@@ -45,7 +45,9 @@ data/runs/
 data/models/
 data/uploads/
 models/
-!data/e2e_synthetic_dataset.csv
+# PDF Documents & Binaries
+*.pdf
+AutoML_Arena_Interview_and_Architecture_Mastery_Guide.pdf
 
 # Temporary test logs and one-off scratch scripts
 scratch/
