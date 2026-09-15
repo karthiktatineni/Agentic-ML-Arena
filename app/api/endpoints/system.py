@@ -24,6 +24,7 @@ def _get_dir_size_mb(path: Path) -> float:
                 pass
     return round(total / (1024 * 1024), 2)
 
+@router.get("/status")
 @router.get("/telemetry")
 async def get_system_telemetry():
     """Return real system hardware and pipeline execution telemetry."""
