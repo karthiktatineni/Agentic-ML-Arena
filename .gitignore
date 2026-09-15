@@ -1,0 +1,66 @@
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# Python bytecode & caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.experiment_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Node & Next.js
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Checkpoints, Locks & Local Databases
+.checkpoints/
+.cache/
+.locks/
+*.db
+*.sqlite
+*.sqlite3
+
+# Large binary artifacts & dynamic run storage
+*.joblib
+data/runs/
+data/models/
+data/uploads/
+models/
+!data/e2e_synthetic_dataset.csv
+
+# Temporary test logs and one-off scratch scripts
+scratch/
+tmp/
+temp/
+output_matrix.txt
+pytest_output.txt
+e2e_output.txt
+final_pytest.txt
+frontend.html
+dummy.csv
+
+# OS metadata
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
