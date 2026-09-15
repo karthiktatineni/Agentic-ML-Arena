@@ -4,7 +4,7 @@
 
 ---
 
-## 🌟 Key Highlights & Capabilities
+## Key Highlights & Capabilities
 
 - **Decentralized Multi-Agent Swarm**: 9 specialized autonomous agents (`IngestionAgent`, `ValidationAgent`, `LeakageDetectorEngine`, `CleaningAgent`, `EDAAgent`, `FeatureAgent`, `PreprocessingAgent`, `SplittingAgent`, `ModelAgent`, `Gate6Evaluator`) orchestrated by a Multi-Armed Bandit `SearchController`.
 - **Statistically Audited Quality Gates**: 6 progressive quality gates enforcing PII removal, 4-stage target leakage detection, cross-validation convergence, fairness audit, and Gate 6 bootstrap superiority testing with Holm-Bonferroni multiple testing corrections.
@@ -17,11 +17,11 @@
   - **Gatekeeper Interlock**: Human-in-the-Loop authorization gate positioned directly on the home page with Canary deployment triggers and 1-click downloads.
   - **Certified Model Registry**: Production registry listing approved champions with 1-click `.joblib` and `predict.py` downloads.
   - **Inference Console**: Real-time interactive model testing with dynamic feature extraction and batch CSV prediction.
-  - **System & Resource Monitor**: Real-time hardware telemetry (`psutil`: 15.7 GB RAM, CPU %, Disk usage, artifact MB) without fabricated mock data.
+  - **System & Resource Monitor**: Real-time hardware telemetry (`psutil`: RAM, CPU %, Disk usage, artifact MB) without fabricated mock data.
 
 ---
 
-## 🏛️ System Architecture & Data Flow
+## System Architecture & Data Flow
 
 ```mermaid
 flowchart TD
@@ -86,7 +86,7 @@ flowchart TD
 
 ---
 
-## 🚀 Quickstart Guide
+## Quickstart Guide
 
 ### Prerequisites
 - Python 3.11+
@@ -110,12 +110,12 @@ npm run dev
 
 ---
 
-## 🕹️ Operational Walkthrough
+## Operational Walkthrough
 
 1. **Upload Dataset & Launch Run**:
    - Go to [http://localhost:3000](http://localhost:3000) (**Arena** tab).
-   - Select a CSV file (e.g. `data/uploads/08f52f47_car_price.csv`).
-   - Choose the target column (e.g. `sellingprice`).
+   - Select any tabular CSV dataset.
+   - Choose the target column.
    - Click **Launch Arena Pipeline**.
 2. **Watch Real-Time Swarm Progress**:
    - The **Decentralized Agent Matrix** SVG dynamically pulses glowing signal lines from the CORE to the active agent node (`CleaningAgent`, `EDAAgent`, `FeatureAgent`, `ModelAgent`, `Gate6Evaluator`).
@@ -135,7 +135,7 @@ npm run dev
 
 ---
 
-## 📦 Dedicated Run Artifact Directory
+## Dedicated Run Artifact Directory
 
 Every run creates a dedicated, self-contained directory:
 
@@ -156,7 +156,7 @@ python data/runs/api_run/predict.py test_data.csv
 
 ---
 
-## 🛡️ Statistical Quality Gates
+## Statistical Quality Gates
 
 | Gate | Name | Audit Mechanism |
 | :--- | :--- | :--- |
@@ -169,7 +169,7 @@ python data/runs/api_run/predict.py test_data.csv
 
 ---
 
-## 📡 Core API Reference
+## Core API Reference
 
 | Endpoint | Method | Purpose |
 | :--- | :--- | :--- |
