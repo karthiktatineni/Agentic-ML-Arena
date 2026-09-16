@@ -33,8 +33,6 @@ class ModelAgent:
         self.config = config or GlobalRunConfig()
         self.hpo_engine = HPOEngine(self.config)
         self.evaluator = EvaluatorEngine()
-        self.last_hpo_summary: Optional[Dict[str, Any]] = None
-        self.last_hpo_oof_preds: Optional[np.ndarray] = None
 
     def _cross_validate(self, params: Dict[str, Any], X: pd.DataFrame, y: pd.Series) -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
         """Run K-Fold CV and return the full fold summary plus OOF predictions."""
@@ -54,23 +52,7 @@ class ModelAgent:
         fold_metrics = []
         oof_preds = np.zeros(len(y)) if self.model_def.task_type == "classification" else np.zeros(len(y))
         
-        for fold_idx, (train_idx, val_idx) in enumerate(cv.split(X, y)):
-            # Emit live fold progress to event bus so the dashboard moves in real time
-            try:
-                from app.events.bus import event_bus
-                from app.events.schemas import PipelineStageUpdatedEvent
-                run_id = getattr(self.config, "run_id", None) or "api_run"
-                model_name = self.model_def.__class__.__name__
-                event_bus.publish(PipelineStageUpdatedEvent(
-                    run_id=run_id,
-                    stage_name="Model Arena",
-                    status="ACTIVE",
-                    message=f"Training {model_name} Fold {fold_idx + 1}/{n_splits}...",
-                    metadata={"fold": fold_idx + 1, "total_folds": n_splits, "model": model_name}
-                ))
-            except Exception:
-                pass
-
+        for train_idx, val_idx in cv.split(X, y):
             X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
             y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
             
@@ -122,26 +104,17 @@ class ModelAgent:
         return summary, oof_preds
 
     def run_hpo(self, X: pd.DataFrame, y: pd.Series, study_name: str) -> Tuple[Dict[str, Any], float]:
-        """Run HPO using Optuna, retaining best trial summary and OOF predictions."""
-        best_trial_data = {"summary": None, "oof_preds": None, "best_score": -float("inf")}
-
+        """Run HPO using Optuna."""
         def objective(trial: optuna.Trial) -> float:
             params = self.model_def.get_search_space(trial)
-            summary, oof_preds = self._cross_validate(params, X, y)
-            score = float(summary["mean_cv_score"])
-            if score > best_trial_data["best_score"] or best_trial_data["summary"] is None:
-                best_trial_data["best_score"] = score
-                best_trial_data["summary"] = summary
-                best_trial_data["oof_preds"] = oof_preds
-            return score
+            summary, _ = self._cross_validate(params, X, y)
+            return summary["mean_cv_score"]
             
         best_params, best_value, stats = self.hpo_engine.optimize_candidate(
             study_name=study_name,
             objective_fn=objective,
             direction="maximize",
         )
-        self.last_hpo_summary = best_trial_data["summary"]
-        self.last_hpo_oof_preds = best_trial_data["oof_preds"]
         return best_params, best_value
 
     def train_final_model(self, X: pd.DataFrame, y: pd.Series, params: Dict[str, Any]):

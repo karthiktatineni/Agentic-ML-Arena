@@ -23,13 +23,6 @@ class ThresholdOptimizer:
     ) -> Dict[str, Any]:
         """Sweep thresholds to maximize a given metric."""
         y_true = np.asarray(y_true)
-        if len(np.unique(y_true)) != 2:
-            return {
-                "metric": metric,
-                "best_threshold": 0.5,
-                "best_score": 0.0
-            }
-
         # Ensure we're using the probability of the positive class
         if y_prob.ndim == 2 and y_prob.shape[1] == 2:
             y_prob_pos = y_prob[:, 1]

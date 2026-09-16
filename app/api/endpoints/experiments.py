@@ -235,33 +235,14 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
         warning_reason = None
 
         def metric_func(y, p):
-            try:
-                y_arr = np.asarray(y)
-                p_arr = np.asarray(p)
-                min_l = min(len(y_arr), len(p_arr))
-                if min_l == 0:
-                    return 0.0
-                y_arr = y_arr[:min_l]
-                p_arr = p_arr[:min_l]
-
-                if task_type == "regression":
-                    from sklearn.metrics import r2_score
-                    val = float(r2_score(y_arr, p_arr))
-                    return val if np.isfinite(val) else 0.0
-
-                is_multi = len(np.unique(y_arr)) > 2 or len(np.unique(p_arr)) > 2
-                if is_multi:
-                    preds_discrete = p_arr.round().astype(int)
-                    return float(f1_score(y_arr, preds_discrete, average="weighted", zero_division=0))
-
-                # Binary classification
-                preds_binary = (p_arr >= 0.5).astype(int) if (p_arr.dtype == float or ((p_arr >= 0).all() and (p_arr <= 1).all())) else p_arr.astype(int)
-                return float(f1_score(y_arr, preds_binary, zero_division=0))
-            except Exception:
-                return 0.0
+            if task_type == "regression":
+                from sklearn.metrics import r2_score
+                return float(r2_score(y, p))
+            return float(f1_score(y, np.array(p) >= 0.5))
 
         for attempt in range(1, max_attempts + 1):
             logger.info(f"=== Starting Pipeline Search Loop (Attempt {attempt}/{max_attempts}) ===")
+            _emit_stage("Search Loop", "START", metadata={"attempt": attempt, "total_attempts": max_attempts})
             
             # Ensure each attempt explores different splits / stochastic paths
             config.random_seed = 42 + (attempt - 1) * 100
@@ -387,23 +368,8 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             _emit_stage("Baseline", "COMPLETE")
             
             # Model Arena / Search Loop
-            _emit_stage("Model Arena", "START", message=f"Attempt {attempt}/{max_attempts}: Initializing Model Arena...", run_id=run_id)
-            _emit_stage("Search Loop", "START", message=f"Attempt {attempt}/{max_attempts}: Searching candidate architectures...", metadata={"attempt": attempt, "total_attempts": max_attempts}, run_id=run_id)
-            
-            # Clean up stale locks older than 60s
+            _emit_stage("Model Arena", "START")
             lock_manager = FileLockManager(lock_dir=".cache/locks")
-            try:
-                import glob
-                now_ts = time.time()
-                for lf in glob.glob(".cache/locks/*.json") + glob.glob(".cache/locks/*.meta"):
-                    try:
-                        if os.path.exists(lf) and (now_ts - os.path.getmtime(lf) > 60):
-                            os.remove(lf)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
             cache = ExperimentCache(lock_manager=lock_manager)
             runner = ExperimentRunner(config, cache, f"api_worker_att_{attempt}")
             controller = SearchController(actions=["TRY_MODEL"])
@@ -417,51 +383,26 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             completed_experiments = []
             trained_models = {}
             
-            for idx, (name, model_def) in enumerate(models_to_test):
+            for name, model_def in models_to_test:
                 await _check_pause_or_abort()
                 action = controller.select_action(state)
                 if action == "STOP":
                     break
                     
-                model_name = model_def.__class__.__name__
                 exp_hash = f"api_att{attempt}_{name}_{uuid.uuid4().hex[:6]}"
                 exp = ExperimentObject(
                     experiment_hash=exp_hash,
                     run_id=run_id,
-                    model_family=model_name,
+                    model_family=model_def.__class__.__name__,
                     hyperparameters={},
                     state=ExperimentState.CREATED
                 )
-                
-                _emit_stage(
-                    "Model Arena",
-                    "ACTIVE",
-                    message=f"Attempt {attempt}/{max_attempts}: Evaluating {model_name} ({idx + 1}/{len(models_to_test)}) via 5-Fold Cross-Validation...",
-                    metadata={"candidate": model_name, "candidate_idx": idx + 1, "total_candidates": len(models_to_test), "attempt": attempt},
-                    run_id=run_id
-                )
-                _emit_stage(
-                    "Search Loop",
-                    "ACTIVE",
-                    message=f"Attempt {attempt}/{max_attempts}: Optimizing hyperparameters for {model_name}...",
-                    metadata={"candidate": model_name, "attempt": attempt},
-                    run_id=run_id
-                )
-                
-                event_bus.publish(AgentDecisionEvent(
-                    run_id=run_id,
-                    agent_name="ModelAgent",
-                    decision_action=f"Contender {idx + 1}/{len(models_to_test)}: Training {model_name} (5-Fold CV)",
-                    confidence=0.88,
-                    reasoning_summary=f"Running hyperparameter search & cross-validation for {name.upper()} on {splits.train_pool_df.shape[0]} samples."
-                ))
                 
                 logger.info(f"[Attempt {attempt}] Running experiment {exp_hash} ({name})...")
                 try:
                     exp_result = await asyncio.to_thread(runner.run_experiment, exp, model_def, splits)
                     if exp_result.metrics:
                         completed_experiments.append(exp_result)
-                        score_val = exp_result.metrics.selection_val_score if exp_result.metrics.selection_val_score is not None else exp_result.metrics.mean_cv_score
                         state.update_scores(
                             exp_result.experiment_hash,
                             exp_result.metrics.selection_val_score,
@@ -470,104 +411,74 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
                         )
                         controller.update(action, exp_result.metrics.selection_val_score)
                         
-                        # Reuse trained model from runner if available to avoid duplicate full training
-                        final_model = getattr(runner, "trained_models", {}).get(exp_result.experiment_hash)
-                        if final_model is None:
-                            agent = ModelAgent(model_def=model_def, config=config)
-                            X_train = splits.train_pool_df.drop(columns=[target_column])
-                            y_train = splits.train_pool_df[target_column]
-                            final_model = agent.train_final_model(X_train, y_train, exp_result.hyperparameters)
+                        agent = ModelAgent(model_def=model_def, config=config)
+                        X_train = splits.train_pool_df.drop(columns=[target_column])
+                        y_train = splits.train_pool_df[target_column]
+                        final_model = agent.train_final_model(X_train, y_train, exp_result.hyperparameters)
                         trained_models[exp_result.experiment_hash] = final_model
-                        
-                        event_bus.publish(AgentDecisionEvent(
-                            run_id=run_id,
-                            agent_name="ModelAgent",
-                            decision_action=f"Contender {model_name} Completed: Score {score_val:.4f}",
-                            confidence=0.92,
-                            reasoning_summary=f"Mean CV: {exp_result.metrics.mean_cv_score:.4f} (±{exp_result.metrics.std_cv_score:.4f}), Val Score: {score_val:.4f}."
-                        ))
-                        _emit_stage(
-                            "Model Arena",
-                            "ACTIVE",
-                            message=f"{model_name} evaluated with score {score_val:.4f} ({idx + 1}/{len(models_to_test)})",
-                            metadata={"candidate": model_name, "score": score_val},
-                            run_id=run_id
-                        )
                 except Exception as e:
                     import traceback
                     logger.error(f"Experiment failed: {e}\n{traceback.format_exc()}")
                     
-            _emit_stage("Model Arena", "COMPLETE", message=f"Model Arena complete: {len(completed_experiments)} candidates tested.", run_id=run_id)
-            _emit_stage("Search Loop", "COMPLETE", message=f"Search Loop complete for attempt {attempt}.", run_id=run_id)
+            _emit_stage("Model Arena", "COMPLETE")
+            _emit_stage("Search Loop", "COMPLETE")
             
             # Champion Selection for current attempt (using cumulative tracker)
             _emit_stage("Certification", "START")
             if not completed_experiments:
                 logger.warning(f"Attempt {attempt}: No completed experiments.")
-                if attempt < max_attempts:
-                    continue
-                else:
-                    break
+                continue
 
-            try:
-                champion = ChampionSelectionEngine.select_champion(
-                    completed_experiments,
-                    y_true_selection_val=y_true,
-                    metric_func=metric_func,
-                    correction_tracker=tracker,
-                    alpha=config.significance_level,
-                )
-            except Exception as e:
-                logger.warning(f"ChampionSelectionEngine error in attempt {attempt}: {e}")
-                champion = None
-
-            if champion is None or not champion.metrics:
-                # Defensive fallback to experiment with highest score
-                candidate_pool = [e for e in completed_experiments if e.metrics]
-                if candidate_pool:
-                    champion = max(
-                        candidate_pool,
-                        key=lambda e: (e.metrics.selection_val_score if e.metrics.selection_val_score is not None else e.metrics.mean_cv_score)
-                    )
-                else:
-                    champion = completed_experiments[0] if completed_experiments else None
+            champion = ChampionSelectionEngine.select_champion(
+                completed_experiments,
+                y_true_selection_val=y_true,
+                metric_func=metric_func,
+                correction_tracker=tracker,
+                alpha=config.significance_level,
+            )
 
             if champion is None or not champion.metrics:
                 logger.warning(f"Attempt {attempt}: No valid champion selected.")
+                continue
+
+            champion_score = champion.metrics.selection_val_score
+            
+            # Gate 6: Baseline Superiority test with attempt-adjusted alpha
+            # Alpha is Bonferroni-corrected for attempt number to prevent p-hacking across retries
+            adjusted_gate6_alpha = config.significance_level / attempt
+            
+            baseline_comparison = bootstrap_paired_comparison(
+                y_true=y_true,
+                preds_a=champion.metrics.selection_val_predictions,
+                preds_b=baseline_preds,
+                metric_func=metric_func,
+                alpha=adjusted_gate6_alpha,
+                n_iterations=100
+            )
+            
+            mean_diff = baseline_comparison["mean_diff"]
+            p_value = baseline_comparison.get("p_value", 1.0)
+            clears_practical = mean_diff >= config.min_practical_effect_size
+            clears_statistical = p_value < adjusted_gate6_alpha
+
+            if not (clears_practical and clears_statistical):
+                logger.warning(
+                    f"Attempt {attempt} champion failed Gate 6: "
+                    f"mean_diff={mean_diff:.4f} (req >= {config.min_practical_effect_size:.4f}), "
+                    f"p_value={p_value:.4f} (req < {adjusted_gate6_alpha:.4f})"
+                )
                 if attempt < max_attempts:
+                    logger.info(f"Retrying pipeline search loop (attempt {attempt + 1} of {max_attempts})...")
+                    await asyncio.sleep(0.5)
                     continue
                 else:
                     break
 
-            champion_score = champion.metrics.selection_val_score if champion.metrics.selection_val_score is not None else champion.metrics.mean_cv_score
-            
-            # Gate 6: Baseline Superiority test with attempt-adjusted alpha
-            adjusted_gate6_alpha = config.significance_level / attempt
-            
-            try:
-                baseline_comparison = bootstrap_paired_comparison(
-                    y_true=y_true,
-                    preds_a=champion.metrics.selection_val_predictions,
-                    preds_b=baseline_preds,
-                    metric_func=metric_func,
-                    alpha=adjusted_gate6_alpha,
-                    n_iterations=100
-                )
-                mean_diff = baseline_comparison["mean_diff"]
-                p_value = baseline_comparison.get("p_value", 1.0)
-            except Exception as e:
-                logger.warning(f"Gate 6 comparison exception in attempt {attempt}: {e}")
-                mean_diff = float(champion_score)
-                p_value = 0.01 if mean_diff > 0 else 1.0
-
-            clears_practical = mean_diff >= config.min_practical_effect_size
-            clears_statistical = p_value < adjusted_gate6_alpha
-            gate6_passed = bool(clears_practical and clears_statistical)
-
+            # Champion successfully passed Gate 6 baseline evaluation!
             champion_metrics = champion.metrics.model_dump()
             champion_metrics["multiple_comparison_correction"] = config.multiple_comparison_correction
             champion_metrics["comparison_count"] = tracker.total_comparisons_made
-            champion_metrics["baseline_gate_passed"] = gate6_passed
+            champion_metrics["baseline_gate_passed"] = True
             champion_metrics["baseline_effect_size"] = mean_diff
             champion_metrics["gate6_adjusted_alpha"] = adjusted_gate6_alpha
             champion_metrics["pipeline_attempt"] = attempt
@@ -576,30 +487,27 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             event_bus.publish(AgentDecisionEvent(
                 run_id=run_id,
                 agent_name="Gate6Evaluator",
-                decision_action=f"Attempt {attempt}: Champion {champion.experiment_hash} {'passed' if gate6_passed else 'below strict'} baseline test.",
-                confidence=float(max(0.01, min(0.99, 1.0 - p_value if np.isfinite(p_value) else 0.5))),
-                reasoning_summary=f"Effect size {mean_diff:.4f} (req >= {config.min_practical_effect_size:.4f}), p-val {p_value:.4f} (req < {adjusted_gate6_alpha:.4f})."
+                decision_action=f"Attempt {attempt}: Champion {champion.experiment_hash} passed baseline test.",
+                confidence=float(max(0.01, min(0.99, 1.0 - p_value))),
+                reasoning_summary=f"Effect size {mean_diff:.4f} >= {config.min_practical_effect_size:.4f}, p-val {p_value:.4f} < {adjusted_gate6_alpha:.4f}."
             ))
 
-            # Threshold Optimization (only for binary classification)
+
+            # Threshold Optimization
             best_threshold = None
-            is_binary = task_type == "classification" and len(np.unique(splits.train_pool_df[target_column])) == 2
-            if is_binary and champion.metrics:
+            if task_type == "classification" and champion.metrics:
                 oof_probabilities = champion.metrics.additional_metrics.get("oof_predictions", [])
                 y_threshold = splits.train_pool_df[target_column].values.tolist()
                 if len(oof_probabilities) == len(y_threshold) and len(oof_probabilities) > 0:
-                    try:
-                        opt_res = ThresholdOptimizer.optimize_champion_threshold(
-                            champion_experiment=champion,
-                            y_true_train_cv=np.array(y_threshold),
-                            oof_probabilities=np.array(oof_probabilities),
-                            metric=config.primary_metric
-                        )
-                        best_threshold = opt_res["best_threshold"]
-                        champion_metrics["best_threshold_score"] = opt_res["best_score"]
-                        logger.info(f"Threshold Optimization: {best_threshold:.4f} (Score: {opt_res['best_score']:.4f})")
-                    except Exception as te:
-                        logger.warning(f"Threshold optimization skipped: {te}")
+                    opt_res = ThresholdOptimizer.optimize_champion_threshold(
+                        champion_experiment=champion,
+                        y_true_train_cv=np.array(y_threshold),
+                        oof_probabilities=np.array(oof_probabilities),
+                        metric=config.primary_metric
+                    )
+                    best_threshold = opt_res["best_threshold"]
+                    champion_metrics["best_threshold_score"] = opt_res["best_score"]
+                    logger.info(f"Threshold Optimization: {best_threshold:.4f} (Score: {opt_res['best_score']:.4f})")
             
             champion_metrics["threshold"] = best_threshold if best_threshold is not None else (0.5 if task_type == "classification" else None)
 
@@ -661,8 +569,9 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
                 "dependencies": bundle_dependencies,
             }
 
-            # UNCONDITIONALLY track as best valid candidate across all attempts
-            if champion_score > best_valid_score or best_valid_champion is None:
+
+            # Track as best valid candidate across all attempts
+            if champion_score > best_valid_score:
                 best_valid_score = champion_score
                 best_valid_champion = champion
                 best_valid_metrics = champion_metrics
@@ -670,8 +579,8 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
                 best_valid_bundle = bundle
                 best_valid_mean_diff = mean_diff
 
-            # Check hard target threshold (e.g. >= 0.90) and gate6
-            if champion_score >= config.desired_score and gate6_passed:
+            # Check hard target threshold (e.g. >= 0.90)
+            if champion_score >= config.desired_score:
                 logger.info(f"Target score satisfied in attempt {attempt}: {champion_score:.4f} >= {config.desired_score:.4f}")
                 certified_champion = champion
                 certified_bundle = bundle
@@ -681,21 +590,18 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
                 break
             else:
                 logger.info(
-                    f"Attempt {attempt} completed (score: {champion_score:.4f}, target: {config.desired_score:.4f}, gate6: {gate6_passed}). "
+                    f"Attempt {attempt} score {champion_score:.4f} < desired target {config.desired_score:.4f}. "
                     f"Best valid score so far: {best_valid_score:.4f}"
                 )
                 if attempt < max_attempts:
                     logger.info(f"Retrying pipeline (attempt {attempt + 1} of {max_attempts})...")
-                    _emit_stage("Search Loop", "ACTIVE", message=f"Attempt {attempt} completed (Score: {champion_score:.4f}). Retrying pipeline with alternative seed (Attempt {attempt + 1}/{max_attempts})...", run_id=run_id)
                     await asyncio.sleep(0.5)
-                else:
-                    break
 
         # After search loop attempts complete
         if not target_achieved:
             if best_valid_champion is not None:
                 logger.warning(
-                    f"All {max_attempts} attempts completed. "
+                    f"All {max_attempts} attempts completed without hitting desired score {config.desired_score:.4f}. "
                     f"Certifying best valid candidate from attempt {best_valid_attempt} (score: {best_valid_score:.4f}) per PRD §35/§51."
                 )
                 certified_champion = best_valid_champion
@@ -704,52 +610,26 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
                 certified_attempt = best_valid_attempt
                 target_achieved = False
                 warning_reason = (
-                    f"Certified top candidate (Score: {best_valid_score:.4f}) per PRD §35/§51. "
-                    f"Target score {config.desired_score:.4f} or strict Gate 6 baseline significance was not fully cleared."
+                    f"Target score {config.desired_score:.4f} not reached after {max_attempts} attempts. "
+                    f"Certified best valid candidate (Score: {best_valid_score:.4f}) per PRD §35/§51."
                 )
                 certified_metrics["target_hit"] = False
                 certified_metrics["below_target_warning"] = warning_reason
             else:
-                # Fallback baseline model so certification never fails
-                logger.warning("No candidate models available from arena. Certifying baseline fallback model.")
-                target_achieved = False
-                warning_reason = "Certified baseline model. Candidate models encountered execution errors on this dataset."
-                feature_names = [c for c in splits.train_pool_df.columns if c != target_column]
-                certified_bundle = {
-                    "model": baseline,
-                    "feature_names": feature_names,
-                    "categorical_features": {},
-                    "categorical_columns": [],
-                    "numeric_columns": feature_names,
-                    "category_values": {},
-                    "model_name": baseline.__class__.__name__,
-                    "run_id": run_id,
-                    "hyperparameters": {},
-                    "score": 0.0,
-                    "best_threshold": 0.5 if task_type == "classification" else None,
-                    "task_type": task_type,
-                    "pipeline_attempt": max_attempts,
-                    "dependencies": {},
-                }
-                certified_champion = ExperimentObject(
-                    experiment_hash=f"baseline_{run_id}",
+                rejection_reason = f"All {max_attempts} pipeline attempts failed Gate 6 baseline certification."
+                logger.error(rejection_reason)
+                event_bus.publish(CertificationRejectedEvent(
                     run_id=run_id,
-                    model_family=baseline.__class__.__name__,
-                    state="COMPLETED",
-                    metrics=ExperimentMetrics(
-                        primary_metric=config.primary_metric,
-                        selection_val_score=0.0,
-                    )
-                )
-                certified_metrics = {
-                    "primary_metric": config.primary_metric,
-                    "selection_val_score": 0.0,
-                    "baseline_gate_passed": False,
-                    "target_hit": False,
-                    "below_target_warning": warning_reason,
-                    "threshold": 0.5 if task_type == "classification" else None
-                }
-                certified_attempt = max_attempts
+                    reason=rejection_reason,
+                    correction_method=config.multiple_comparison_correction,
+                    comparison_count=tracker.total_comparisons_made,
+                    correction_history=tracker.history,
+                    pipeline_attempt=max_attempts,
+                    total_pipeline_attempts=max_attempts,
+                ))
+                await asyncio.sleep(0.5)
+                _emit_stage("Certification", "FAILED")
+                return
 
         champion_score = certified_champion.metrics.selection_val_score if certified_champion.metrics else 0.0
 
@@ -941,8 +821,7 @@ if __name__ == "__main__":
         )
 
     except Exception as e:
-        import traceback
-        logger.error(f"Unhandled exception in search loop task: {e}\n{traceback.format_exc()}")
+        logger.error(f"Unhandled exception in search loop task: {e}")
 
 @router.post("/run")
 async def start_dashboard_experiment(

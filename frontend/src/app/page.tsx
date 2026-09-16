@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import Navigation, { NavTab } from '../components/Navigation';
 import { useDashboardSocket } from '../hooks/useDashboardSocket';
-import { useBackendKeepAlive } from '../hooks/useBackendKeepAlive';
 
 import { API_BASE_URL, WS_BASE_URL } from '../config';
 
@@ -17,9 +16,7 @@ import ResourceCostMonitorView from '../components/views/ResourceCostMonitorView
 
 export default function DashboardPage() {
   const WS_URL = `${WS_BASE_URL}/api/v1/ws/dashboard`;
-  const { isConnected, events, activeStages, stageMessages, latestMessage, championData } = useDashboardSocket(WS_URL);
-  // Keep-alive heartbeat pings backend every 3.5 mins to prevent cloud spin-down
-  const keepAlive = useBackendKeepAlive(210_000);
+  const { isConnected, events, activeStages, championData } = useDashboardSocket(WS_URL);
   const [activeTab, setActiveTab] = useState<NavTab>('mission-control');
   const [targetModelForPrediction, setTargetModelForPrediction] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
@@ -100,22 +97,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Cloud Backend Waking Up Alert (Render Free Tier Cold Start) */}
-      {!keepAlive.isAwake && keepAlive.consecutiveFailures > 0 && (
-        <div className="fixed top-16 left-0 w-full z-40 bg-amber-950/90 text-amber-200 border-b border-amber-500/40 px-6 py-2 text-xs font-mono flex items-center justify-between backdrop-blur-md">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[16px] animate-spin text-amber-400">sync</span>
-            <span>Cloud backend is waking up from sleep (Render cold start)... Keep-alive heartbeat pinging now.</span>
-          </div>
-          <button
-            onClick={() => keepAlive.pingBackend()}
-            className="px-2.5 py-0.5 rounded bg-amber-700/80 hover:bg-amber-600 text-white font-bold cursor-pointer transition-colors text-[11px]"
-          >
-            Ping Now
-          </button>
-        </div>
-      )}
-
       {/* Fixed Header & Operations Deck Sidebar */}
       <Navigation
         activeTab={activeTab}
@@ -126,9 +107,6 @@ export default function DashboardPage() {
         isPaused={isPaused}
         onPause={handlePause}
         onAbort={handleAbort}
-        isBackendAwake={keepAlive.isAwake}
-        isBackendPinging={keepAlive.isPinging}
-        latencyMs={keepAlive.latencyMs}
       />
 
       {/* Main Content Viewport */}
@@ -138,8 +116,6 @@ export default function DashboardPage() {
             <MissionControlView
               events={events}
               activeStages={activeStages}
-              stageMessages={stageMessages}
-              latestMessage={latestMessage}
               championData={championData}
               onNavigate={(tab) => setActiveTab(tab)}
               onPredictModel={handlePredictModel}

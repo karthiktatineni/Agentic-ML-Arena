@@ -24,73 +24,60 @@ class ChampionSelectionEngine:
         if correction_tracker is None:
             correction_tracker = MultipleTestingCorrection(alpha=alpha)
             
-        # 1. First preference: experiments with metrics, selection_val_score and predictions
+        # Filter for completed experiments with valid selection-validation predictions
         valid_experiments = [
             e for e in experiments 
-            if e.metrics and e.metrics.selection_val_score is not None and e.metrics.selection_val_predictions
+            if e.state == "COMPLETED" and e.metrics and e.metrics.selection_val_score is not None and e.metrics.selection_val_predictions
         ]
         
-        # 2. Fallback: any experiment with metrics and a score
         if not valid_experiments:
-            valid_experiments = [
-                e for e in experiments 
-                if e.metrics and (e.metrics.selection_val_score is not None or e.metrics.mean_cv_score is not None)
-            ]
-
-        # 3. Last resort fallback
-        if not valid_experiments:
-            valid_experiments = [e for e in experiments if e.metrics]
-            
-        if not valid_experiments:
-            return experiments[0] if experiments else None
+            return None
             
         if len(valid_experiments) == 1:
             return valid_experiments[0]
             
-        # Helper to get score safely
-        def get_score(exp):
-            if not exp.metrics:
-                return -float("inf")
-            if exp.metrics.selection_val_score is not None:
-                return exp.metrics.selection_val_score
-            return exp.metrics.mean_cv_score or -float("inf")
-
         # Sort by raw selection validation score descending (assuming higher is better)
         sorted_experiments = sorted(
             valid_experiments, 
-            key=get_score, 
+            key=lambda x: x.metrics.selection_val_score, 
             reverse=True
         )
         
         champion = sorted_experiments[0]
         
         for e in sorted_experiments[1:]:
-            try:
-                preds_champ = champion.metrics.selection_val_predictions if champion.metrics else []
-                preds_challenger = e.metrics.selection_val_predictions if e.metrics else []
-                if not preds_champ or not preds_challenger or not y_true_selection_val:
-                    continue
-
-                res = bootstrap_paired_comparison(
-                    y_true=y_true_selection_val,
-                    preds_a=preds_champ,
-                    preds_b=preds_challenger,
-                    metric_func=metric_func,
-                    alpha=alpha,
-                    n_iterations=100
-                )
-                
-                # Record this comparison in the global tracker
-                eval_result = correction_tracker.evaluate_comparison(
-                    candidate_a=champion.experiment_hash,
-                    candidate_b=e.experiment_hash,
-                    raw_p_value=res.get("p_value", 1.0),
-                    mean_diff=res.get("mean_diff", 0.0)
-                )
-                
-                if eval_result.get("mean_diff", 0.0) < 0 and eval_result.get("clears_statistical") and eval_result.get("clears_practical"):
-                    champion = e
-            except Exception:
-                continue
+            res = bootstrap_paired_comparison(
+                y_true=y_true_selection_val,
+                preds_a=champion.metrics.selection_val_predictions,
+                preds_b=e.metrics.selection_val_predictions,
+                metric_func=metric_func,
+                alpha=alpha,
+                n_iterations=100
+            )
+            
+            # Record this comparison in the global tracker
+            eval_result = correction_tracker.evaluate_comparison(
+                candidate_a=champion.experiment_hash,
+                candidate_b=e.experiment_hash,
+                raw_p_value=res["p_value"],
+                mean_diff=res["mean_diff"]
+            )
+            
+            # If the current champion CAN significantly beat this trailing model,
+            # we keep the champion. If it CANNOT, it means they are statistically tied.
+            # PRD: "keep the incumbent when tied". The incumbent is the higher-scoring 
+            # model (champion). Therefore, we DO NOTHING on a tie. The champion remains.
+            # We only demote the champion if a challenger somehow significantly BEATS it,
+            # but since they are sorted by score descending, a trailing model's score is lower.
+            # Wait, if we want to ensure the top scorer is significantly better than the rest,
+            # and if it's NOT, we might prefer a SIMPLER model. But if the rule is strictly
+            # "keep the incumbent when tied" where incumbent = highest score, then
+            # the champion never loses to a lower-scoring model.
+            
+            # If the PRD meant "the previously deployed model in registry" as incumbent,
+            # that's different. Assuming incumbent = top scorer in current run:
+            if eval_result["mean_diff"] < 0 and eval_result["clears_statistical"] and eval_result["clears_practical"]:
+                # The trailing model somehow significantly beat the champion (should be impossible if sorted by score)
+                champion = e
             
         return champion

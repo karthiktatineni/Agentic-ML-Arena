@@ -18,8 +18,6 @@ export function useDashboardSocket(url: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [events, setEvents] = useState<DashboardEvent[]>([]);
   const [activeStages, setActiveStages] = useState<Record<string, string>>({}); // stage_name -> status
-  const [stageMessages, setStageMessages] = useState<Record<string, string>>({}); // stage_name -> message
-  const [latestMessage, setLatestMessage] = useState<string | null>(null);
   const [championData, setChampionData] = useState<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -46,13 +44,6 @@ export function useDashboardSocket(url: string) {
               ...prev,
               [data.stage_name]: data.status,
             }));
-            if (data.message) {
-              setStageMessages((prev) => ({
-                ...prev,
-                [data.stage_name]: data.message,
-              }));
-              setLatestMessage(data.message);
-            }
           } else if (data._type === 'ChampionCertifiedEvent' || data.event_type === 'CHAMPION_CERTIFIED') {
             setChampionData(data);
           }
@@ -85,5 +76,5 @@ export function useDashboardSocket(url: string) {
     };
   }, [url]);
 
-  return { isConnected, events, activeStages, stageMessages, latestMessage, championData };
+  return { isConnected, events, activeStages, championData };
 }
