@@ -31,28 +31,46 @@ class ExperimentRunner:
 
     def _selection_score(self, y_true, preds, y_prob=None) -> float:
         from sklearn.metrics import f1_score, r2_score, roc_auc_score, accuracy_score
+        try:
+            metric = self.config.primary_metric
+            is_multi = pd.Series(y_true).nunique() > 2
 
-        metric = self.config.primary_metric
-        if metric == "r2":
-            return float(r2_score(y_true, preds))
-        if metric == "f1":
+            if metric == "r2":
+                val = float(r2_score(y_true, preds))
+                return val if np.isfinite(val) else 0.0
+            if metric == "f1":
+                if is_multi:
+                    preds_discrete = np.asarray(preds).round().astype(int)
+                    return float(f1_score(y_true, preds_discrete, average="weighted", zero_division=0))
+                binary_preds = (np.asarray(preds) >= 0.5).astype(int)
+                return float(f1_score(y_true, binary_preds, zero_division=0))
+            if metric == "roc_auc" and y_prob is not None:
+                try:
+                    if getattr(y_prob, "ndim", 1) == 2 and y_prob.shape[1] > 2:
+                        return float(roc_auc_score(y_true, y_prob, multi_class="ovr"))
+                    prob_pos = y_prob[:, 1] if getattr(y_prob, "ndim", 1) == 2 else y_prob
+                    return float(roc_auc_score(y_true, prob_pos))
+                except Exception:
+                    pass
+            if metric == "accuracy":
+                preds_discrete = np.asarray(preds).round().astype(int) if is_multi else (np.asarray(preds) >= 0.5).astype(int)
+                return float(accuracy_score(y_true, preds_discrete))
+            if self.config.primary_metric in ("rmse", "mse", "mae"):
+                from sklearn.metrics import mean_squared_error, mean_absolute_error
+                if metric == "mae":
+                    return -float(mean_absolute_error(y_true, preds))
+                return -float(mean_squared_error(y_true, preds))
+            # Task-aware fallback
+            if pd.api.types.is_numeric_dtype(pd.Series(y_true)) and pd.Series(y_true).nunique() > 15:
+                val = float(r2_score(y_true, preds))
+                return val if np.isfinite(val) else 0.0
+            if is_multi:
+                preds_discrete = np.asarray(preds).round().astype(int)
+                return float(f1_score(y_true, preds_discrete, average="weighted", zero_division=0))
             binary_preds = (np.asarray(preds) >= 0.5).astype(int)
             return float(f1_score(y_true, binary_preds, zero_division=0))
-        if metric == "roc_auc" and y_prob is not None:
-            prob_pos = y_prob[:, 1] if getattr(y_prob, "ndim", 1) == 2 else y_prob
-            return float(roc_auc_score(y_true, prob_pos))
-        if metric == "accuracy":
-            return float(accuracy_score(y_true, preds))
-        if self.config.primary_metric in ("rmse", "mse", "mae"):
-            from sklearn.metrics import mean_squared_error, mean_absolute_error
-            if metric == "mae":
-                return -float(mean_absolute_error(y_true, preds))
-            return -float(mean_squared_error(y_true, preds))
-        # Task-aware fallback
-        if pd.api.types.is_numeric_dtype(pd.Series(y_true)) and pd.Series(y_true).nunique() > 15:
-            return float(r2_score(y_true, preds))
-        binary_preds = (np.asarray(preds) >= 0.5).astype(int)
-        return float(f1_score(y_true, binary_preds, zero_division=0))
+        except Exception:
+            return 0.0
         
     def run_experiment(
         self,
