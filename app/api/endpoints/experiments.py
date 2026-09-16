@@ -262,7 +262,6 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
 
         for attempt in range(1, max_attempts + 1):
             logger.info(f"=== Starting Pipeline Search Loop (Attempt {attempt}/{max_attempts}) ===")
-            _emit_stage("Search Loop", "START", metadata={"attempt": attempt, "total_attempts": max_attempts})
             
             # Ensure each attempt explores different splits / stochastic paths
             config.random_seed = 42 + (attempt - 1) * 100
@@ -388,8 +387,23 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             _emit_stage("Baseline", "COMPLETE")
             
             # Model Arena / Search Loop
-            _emit_stage("Model Arena", "START")
+            _emit_stage("Model Arena", "START", message=f"Attempt {attempt}/{max_attempts}: Initializing Model Arena...", run_id=run_id)
+            _emit_stage("Search Loop", "START", message=f"Attempt {attempt}/{max_attempts}: Searching candidate architectures...", metadata={"attempt": attempt, "total_attempts": max_attempts}, run_id=run_id)
+            
+            # Clean up stale locks older than 60s
             lock_manager = FileLockManager(lock_dir=".cache/locks")
+            try:
+                import glob
+                now_ts = time.time()
+                for lf in glob.glob(".cache/locks/*.json") + glob.glob(".cache/locks/*.meta"):
+                    try:
+                        if os.path.exists(lf) and (now_ts - os.path.getmtime(lf) > 60):
+                            os.remove(lf)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             cache = ExperimentCache(lock_manager=lock_manager)
             runner = ExperimentRunner(config, cache, f"api_worker_att_{attempt}")
             controller = SearchController(actions=["TRY_MODEL"])
@@ -403,26 +417,51 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             completed_experiments = []
             trained_models = {}
             
-            for name, model_def in models_to_test:
+            for idx, (name, model_def) in enumerate(models_to_test):
                 await _check_pause_or_abort()
                 action = controller.select_action(state)
                 if action == "STOP":
                     break
                     
+                model_name = model_def.__class__.__name__
                 exp_hash = f"api_att{attempt}_{name}_{uuid.uuid4().hex[:6]}"
                 exp = ExperimentObject(
                     experiment_hash=exp_hash,
                     run_id=run_id,
-                    model_family=model_def.__class__.__name__,
+                    model_family=model_name,
                     hyperparameters={},
                     state=ExperimentState.CREATED
                 )
+                
+                _emit_stage(
+                    "Model Arena",
+                    "ACTIVE",
+                    message=f"Attempt {attempt}/{max_attempts}: Evaluating {model_name} ({idx + 1}/{len(models_to_test)}) via 5-Fold Cross-Validation...",
+                    metadata={"candidate": model_name, "candidate_idx": idx + 1, "total_candidates": len(models_to_test), "attempt": attempt},
+                    run_id=run_id
+                )
+                _emit_stage(
+                    "Search Loop",
+                    "ACTIVE",
+                    message=f"Attempt {attempt}/{max_attempts}: Optimizing hyperparameters for {model_name}...",
+                    metadata={"candidate": model_name, "attempt": attempt},
+                    run_id=run_id
+                )
+                
+                event_bus.publish(AgentDecisionEvent(
+                    run_id=run_id,
+                    agent_name="ModelAgent",
+                    decision_action=f"Contender {idx + 1}/{len(models_to_test)}: Training {model_name} (5-Fold CV)",
+                    confidence=0.88,
+                    reasoning_summary=f"Running hyperparameter search & cross-validation for {name.upper()} on {splits.train_pool_df.shape[0]} samples."
+                ))
                 
                 logger.info(f"[Attempt {attempt}] Running experiment {exp_hash} ({name})...")
                 try:
                     exp_result = await asyncio.to_thread(runner.run_experiment, exp, model_def, splits)
                     if exp_result.metrics:
                         completed_experiments.append(exp_result)
+                        score_val = exp_result.metrics.selection_val_score if exp_result.metrics.selection_val_score is not None else exp_result.metrics.mean_cv_score
                         state.update_scores(
                             exp_result.experiment_hash,
                             exp_result.metrics.selection_val_score,
@@ -431,17 +470,35 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
                         )
                         controller.update(action, exp_result.metrics.selection_val_score)
                         
-                        agent = ModelAgent(model_def=model_def, config=config)
-                        X_train = splits.train_pool_df.drop(columns=[target_column])
-                        y_train = splits.train_pool_df[target_column]
-                        final_model = agent.train_final_model(X_train, y_train, exp_result.hyperparameters)
+                        # Reuse trained model from runner if available to avoid duplicate full training
+                        final_model = getattr(runner, "trained_models", {}).get(exp_result.experiment_hash)
+                        if final_model is None:
+                            agent = ModelAgent(model_def=model_def, config=config)
+                            X_train = splits.train_pool_df.drop(columns=[target_column])
+                            y_train = splits.train_pool_df[target_column]
+                            final_model = agent.train_final_model(X_train, y_train, exp_result.hyperparameters)
                         trained_models[exp_result.experiment_hash] = final_model
+                        
+                        event_bus.publish(AgentDecisionEvent(
+                            run_id=run_id,
+                            agent_name="ModelAgent",
+                            decision_action=f"Contender {model_name} Completed: Score {score_val:.4f}",
+                            confidence=0.92,
+                            reasoning_summary=f"Mean CV: {exp_result.metrics.mean_cv_score:.4f} (±{exp_result.metrics.std_cv_score:.4f}), Val Score: {score_val:.4f}."
+                        ))
+                        _emit_stage(
+                            "Model Arena",
+                            "ACTIVE",
+                            message=f"{model_name} evaluated with score {score_val:.4f} ({idx + 1}/{len(models_to_test)})",
+                            metadata={"candidate": model_name, "score": score_val},
+                            run_id=run_id
+                        )
                 except Exception as e:
                     import traceback
                     logger.error(f"Experiment failed: {e}\n{traceback.format_exc()}")
                     
-            _emit_stage("Model Arena", "COMPLETE")
-            _emit_stage("Search Loop", "COMPLETE")
+            _emit_stage("Model Arena", "COMPLETE", message=f"Model Arena complete: {len(completed_experiments)} candidates tested.", run_id=run_id)
+            _emit_stage("Search Loop", "COMPLETE", message=f"Search Loop complete for attempt {attempt}.", run_id=run_id)
             
             # Champion Selection for current attempt (using cumulative tracker)
             _emit_stage("Certification", "START")
@@ -629,6 +686,7 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
                 )
                 if attempt < max_attempts:
                     logger.info(f"Retrying pipeline (attempt {attempt + 1} of {max_attempts})...")
+                    _emit_stage("Search Loop", "ACTIVE", message=f"Attempt {attempt} completed (Score: {champion_score:.4f}). Retrying pipeline with alternative seed (Attempt {attempt + 1}/{max_attempts})...", run_id=run_id)
                     await asyncio.sleep(0.5)
                 else:
                     break

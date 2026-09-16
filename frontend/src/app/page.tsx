@@ -17,7 +17,7 @@ import ResourceCostMonitorView from '../components/views/ResourceCostMonitorView
 
 export default function DashboardPage() {
   const WS_URL = `${WS_BASE_URL}/api/v1/ws/dashboard`;
-  const { isConnected, events, activeStages, championData } = useDashboardSocket(WS_URL);
+  const { isConnected, events, activeStages, stageMessages, latestMessage, championData } = useDashboardSocket(WS_URL);
   // Keep-alive heartbeat pings backend every 3.5 mins to prevent cloud spin-down
   const keepAlive = useBackendKeepAlive(210_000);
   const [activeTab, setActiveTab] = useState<NavTab>('mission-control');
@@ -138,6 +138,8 @@ export default function DashboardPage() {
             <MissionControlView
               events={events}
               activeStages={activeStages}
+              stageMessages={stageMessages}
+              latestMessage={latestMessage}
               championData={championData}
               onNavigate={(tab) => setActiveTab(tab)}
               onPredictModel={handlePredictModel}

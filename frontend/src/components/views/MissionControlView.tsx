@@ -21,6 +21,8 @@ interface RegisteredModel {
 interface MissionControlViewProps {
   events: DashboardEvent[];
   activeStages: Record<string, string>;
+  stageMessages?: Record<string, string>;
+  latestMessage?: string | null;
   championData?: any;
   onLaunchSuccess?: () => void;
   onNavigate?: (tab: any) => void;
@@ -30,6 +32,8 @@ interface MissionControlViewProps {
 export default function MissionControlView({
   events,
   activeStages,
+  stageMessages = {},
+  latestMessage = null,
   championData,
   onLaunchSuccess,
   onNavigate,
@@ -825,6 +829,15 @@ export default function MissionControlView({
           <span className="text-xs font-mono text-on-surface-variant">REAL-TIME PIPELINE STATE</span>
         </div>
 
+        {/* Live Active Ticker Banner */}
+        {latestMessage && (
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary-container/10 border border-primary-container/30 text-xs font-mono shadow-sm transition-all animate-pulse">
+            <span className="h-2 w-2 rounded-full bg-primary-container animate-ping shrink-0"></span>
+            <span className="font-bold shrink-0 text-primary-container uppercase tracking-wider text-[11px]">ACTIVE TELEMETRY:</span>
+            <span className="text-on-surface truncate font-semibold">{latestMessage}</span>
+          </div>
+        )}
+
         <div className="overflow-x-auto pb-2">
           <div className="flex items-center gap-2 min-w-[900px]">
             {stagesList.map((stage, idx) => {
@@ -832,6 +845,7 @@ export default function MissionControlView({
               const isActive = status === 'START' || status === 'ACTIVE';
               const isComplete = status === 'COMPLETE' || status === 'COMPLETED';
               const isFailed = status === 'FAILED';
+              const message = stageMessages[stage];
 
               return (
                 <React.Fragment key={stage}>
@@ -847,7 +861,7 @@ export default function MissionControlView({
                     }`}
                   >
                     <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-mono opacity-60">0{idx + 1}</span>
+                      <span className="text-[10px] font-mono opacity-60">{String(idx + 1).padStart(2, '0')}</span>
                       {isComplete && (
                         <span className="material-symbols-outlined text-[14px] text-primary-container">check_circle</span>
                       )}
@@ -862,6 +876,11 @@ export default function MissionControlView({
                     <span className="text-[9px] font-mono uppercase tracking-widest mt-0.5">
                       {status}
                     </span>
+                    {isActive && message && (
+                      <span className="text-[8px] font-mono text-primary-container max-w-[120px] truncate mt-0.5" title={message}>
+                        {message}
+                      </span>
+                    )}
                   </div>
                   {idx < stagesList.length - 1 && (
                     <div

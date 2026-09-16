@@ -28,6 +28,7 @@ class ExperimentRunner:
         self.config = config
         self.cache = cache
         self.worker_id = worker_id
+        self.trained_models: Dict[str, Any] = {}
 
     def _selection_score(self, y_true, preds, y_prob=None) -> float:
         from sklearn.metrics import f1_score, r2_score, roc_auc_score, accuracy_score
@@ -131,23 +132,26 @@ class ExperimentRunner:
             study_name = f"study_{experiment.experiment_hash}"
             best_params, best_value = agent.run_hpo(X_train, y_train, study_name)
             
-            # Evaluate using the ModelAgent cross-validation
-            # We already got the mean_cv_score from HPO, but let's do a final CV evaluation to get full metrics
-            
             sm.transition(ExperimentState.EVALUATING)
             experiment.state = sm.current_state
             
-            final_cv_summary, oof_preds = agent._cross_validate(best_params, X_train, y_train)
+            # Reuse CV summary from HPO if available to prevent redundant 5-fold evaluation
+            if getattr(agent, "last_hpo_summary", None) is not None and getattr(agent, "last_hpo_oof_preds", None) is not None:
+                final_cv_summary = agent.last_hpo_summary
+                oof_preds = agent.last_hpo_oof_preds
+            else:
+                final_cv_summary, oof_preds = agent._cross_validate(best_params, X_train, y_train)
             final_cv_score = final_cv_summary["mean_cv_score"]
             
+            # Train final model on full train_pool_df
+            final_estimator = agent.train_final_model(X_train, y_train, best_params)
+            self.trained_models[experiment.experiment_hash] = final_estimator
+
             # Predict on Selection-Validation set (or use OOF for Nested CV)
             if splits.is_nested_cv:
-                selection_val_preds = oof_preds.tolist()
+                selection_val_preds = oof_preds.tolist() if oof_preds is not None else []
                 selection_val_score = final_cv_score
             else:
-                # Train model on full train_pool_df
-                final_estimator = agent.train_final_model(X_train, y_train, best_params)
-                
                 X_val = splits.selection_val_df.drop(columns=[self.config.target])
                 y_val = splits.selection_val_df[self.config.target]
                 
