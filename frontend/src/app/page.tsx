@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import Navigation, { NavTab } from '../components/Navigation';
 import { useDashboardSocket } from '../hooks/useDashboardSocket';
 
+import { API_BASE_URL, WS_BASE_URL } from '../config';
+
 // View Components
 import MissionControlView from '../components/views/MissionControlView';
 import ModelRegistryView from '../components/views/ModelRegistryView';
@@ -13,7 +15,7 @@ import ManualPredictionView from '../components/views/ManualPredictionView';
 import ResourceCostMonitorView from '../components/views/ResourceCostMonitorView';
 
 export default function DashboardPage() {
-  const WS_URL = 'ws://localhost:8000/api/v1/ws/dashboard';
+  const WS_URL = `${WS_BASE_URL}/api/v1/ws/dashboard`;
   const { isConnected, events, activeStages, championData } = useDashboardSocket(WS_URL);
   const [activeTab, setActiveTab] = useState<NavTab>('mission-control');
   const [targetModelForPrediction, setTargetModelForPrediction] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export default function DashboardPage() {
 
   const handlePause = async () => {
     try {
-      const res = await fetch(`http://localhost:8000/api/experiments/${activeRunId}/pause`, { method: 'POST' });
+      const res = await fetch(`${API_BASE_URL}/api/experiments/${activeRunId}/pause`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         setIsPaused(data.is_paused);
@@ -41,7 +43,7 @@ export default function DashboardPage() {
         });
       } else {
         // Fallback to unparameterized endpoint
-        const resFallback = await fetch('http://localhost:8000/api/experiments/pause', { method: 'POST' });
+        const resFallback = await fetch(`${API_BASE_URL}/api/experiments/pause`, { method: 'POST' });
         const data = await resFallback.json();
         setIsPaused(data.is_paused);
         setToast({
@@ -58,12 +60,12 @@ export default function DashboardPage() {
 
   const handleAbort = async () => {
     try {
-      const res = await fetch(`http://localhost:8000/api/experiments/${activeRunId}/abort`, { method: 'POST' });
+      const res = await fetch(`${API_BASE_URL}/api/experiments/${activeRunId}/abort`, { method: 'POST' });
       if (res.ok) {
         setIsPaused(false);
         setToast({ type: 'error', text: 'Emergency Abort executed. Pipeline terminated.' });
       } else {
-        await fetch('http://localhost:8000/api/experiments/abort', { method: 'POST' });
+        await fetch(`${API_BASE_URL}/api/experiments/abort`, { method: 'POST' });
         setIsPaused(false);
         setToast({ type: 'error', text: 'Emergency Abort executed.' });
       }

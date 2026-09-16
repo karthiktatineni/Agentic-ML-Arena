@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../config';
 
 export default function ModelRegistry() {
   const [registry, setRegistry] = useState<any[]>([]);
@@ -8,7 +9,7 @@ export default function ModelRegistry() {
 
   const fetchRegistry = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/v1/experiments/registry');
+      const res = await fetch(`${API_BASE_URL}/api/v1/experiments/registry`);
       if (res.ok) {
         const data = await res.json();
         setRegistry(data.models || []);

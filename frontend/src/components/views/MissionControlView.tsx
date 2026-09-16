@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { DashboardEvent } from '../../hooks/useDashboardSocket';
+import { API_BASE_URL } from '../../config';
 
 interface RegisteredModel {
   run_id: string;
@@ -51,7 +52,7 @@ export default function MissionControlView({
   // Fetch Pending Approvals & Registry on Mount and poll lightly
   const fetchPendingAndRegistry = async () => {
     try {
-      const pendingRes = await fetch('http://localhost:8000/api/experiments/pending');
+      const pendingRes = await fetch(`${API_BASE_URL}/api/experiments/pending`);
       if (pendingRes.ok) {
         const data = await pendingRes.json();
         setPendingApprovals(data.pending || {});
@@ -61,7 +62,7 @@ export default function MissionControlView({
     }
 
     try {
-      const regRes = await fetch('http://localhost:8000/api/predict/models');
+      const regRes = await fetch(`${API_BASE_URL}/api/predict/models`);
       if (regRes.ok) {
         const data = await regRes.json();
         setRegistryModels(data.models || []);
@@ -71,7 +72,7 @@ export default function MissionControlView({
     }
 
     try {
-      const eventsRes = await fetch('http://localhost:8000/api/v1/ws/events/recent');
+      const eventsRes = await fetch(`${API_BASE_URL}/api/v1/ws/events/recent`);
       if (eventsRes.ok) {
         const data = await eventsRes.json();
         if (Array.isArray(data.events) && data.events.length > 0) {
@@ -118,7 +119,7 @@ export default function MissionControlView({
     try {
       const formData = new FormData();
       formData.append('run_id', activePendingRunId);
-      const res = await fetch('http://localhost:8000/api/experiments/approve', {
+      const res = await fetch(`${API_BASE_URL}/api/experiments/approve`, {
         method: 'POST',
         body: formData,
       });
@@ -141,7 +142,7 @@ export default function MissionControlView({
     try {
       const formData = new FormData();
       formData.append('run_id', activePendingRunId);
-      const res = await fetch('http://localhost:8000/api/experiments/reject', {
+      const res = await fetch(`${API_BASE_URL}/api/experiments/reject`, {
         method: 'POST',
         body: formData,
       });
@@ -236,7 +237,7 @@ export default function MissionControlView({
     formData.append('target_column', targetCol);
 
     try {
-      const res = await fetch('http://localhost:8000/api/experiments/run', {
+      const res = await fetch(`${API_BASE_URL}/api/experiments/run`, {
         method: 'POST',
         body: formData,
       });
@@ -476,7 +477,7 @@ export default function MissionControlView({
             {/* Modal Actions */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-outline-variant/30">
               <a
-                href={`http://localhost:8000/api/experiments/download/${activePendingRunId}`}
+                href={`${API_BASE_URL}/api/experiments/download/${activePendingRunId}`}
                 download
                 className="w-full sm:w-auto px-3.5 py-2.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-primary font-mono text-xs transition-all flex items-center justify-center gap-1.5 border border-outline-variant/30 text-center"
               >
@@ -1030,7 +1031,7 @@ export default function MissionControlView({
 
               <div className="bg-surface-container p-3 rounded-lg flex flex-col gap-0.5">
                 <span className="text-[10px] text-on-surface-variant uppercase">Production Endpoint</span>
-                <span className="text-primary-container font-bold truncate">http://localhost:8000/api/predict</span>
+                <span className="text-primary-container font-bold truncate">{API_BASE_URL}/api/predict</span>
                 <span className="text-[11px] text-on-surface-variant/80">High-Throughput Sub-5ms SLA &bull; Stateless Cloud Run Ready</span>
               </div>
             </div>
@@ -1061,8 +1062,8 @@ export default function MissionControlView({
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {registryModels.map((model, idx) => {
               const modelHash = model.model_hash || model.run_id;
-              const downloadUrl = `http://localhost:8000/api/experiments/download/${modelHash}`;
-              const scriptUrl = `http://localhost:8000/api/experiments/download-script/${model.run_id}`;
+              const downloadUrl = `${API_BASE_URL}/api/experiments/download/${modelHash}`;
+              const scriptUrl = `${API_BASE_URL}/api/experiments/download-script/${model.run_id}`;
 
               return (
                 <div

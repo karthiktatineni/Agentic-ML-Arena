@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { API_BASE_URL } from '../config';
 
 interface ChampionData {
   run_id: string;
@@ -22,7 +23,7 @@ export default function ChampionApprovalCard({ champion }: { champion: ChampionD
       const formData = new FormData();
       formData.append('run_id', champion.run_id);
       
-      const res = await fetch(`http://localhost:8000/api/v1/experiments/${action}`, {
+      const res = await fetch(`${API_BASE_URL}/api/v1/experiments/${action}`, {
         method: 'POST',
         body: formData,
       });

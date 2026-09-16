@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config';
 
 interface ModelRegistryItem {
   run_id: string;
@@ -37,9 +38,9 @@ export default function ModelRegistryView({ onPredictModel }: ModelRegistryViewP
     setIsLoading(true);
     try {
       // Try /api/models first, fallback to /api/predict/models
-      let res = await fetch('http://localhost:8000/api/models');
+      let res = await fetch(`${API_BASE_URL}/api/models`);
       if (!res.ok) {
-        res = await fetch('http://localhost:8000/api/predict/models');
+        res = await fetch(`${API_BASE_URL}/api/predict/models`);
       }
       if (res.ok) {
         const data = await res.json();
@@ -65,7 +66,7 @@ export default function ModelRegistryView({ onPredictModel }: ModelRegistryViewP
     setIsDeleting(true);
     const id = deleteTarget.run_id || deleteTarget.model_hash;
     try {
-      const res = await fetch(`http://localhost:8000/api/models/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/models/${id}`, {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -195,9 +196,9 @@ export default function ModelRegistryView({ onPredictModel }: ModelRegistryViewP
                   const hashId = item.model_hash || runId;
                   const arch = item.architecture || item.model_name || 'Champion Model';
                   const scoreVal = item.score !== null && item.score !== undefined ? Number(item.score).toFixed(4) : 'N/A';
-                  const joblibUrl = `http://localhost:8000/api/experiments/download/${hashId}`;
-                  const datasetUrl = `http://localhost:8000/api/experiments/download/${runId}/dataset`;
-                  const scriptUrl = `http://localhost:8000/api/experiments/download-script/${runId}`;
+                  const joblibUrl = `${API_BASE_URL}/api/experiments/download/${hashId}`;
+                  const datasetUrl = `${API_BASE_URL}/api/experiments/download/${runId}/dataset`;
+                  const scriptUrl = `${API_BASE_URL}/api/experiments/download-script/${runId}`;
 
                   return (
                     <tr key={`${runId}-${hashId}`} className="hover:bg-surface-container/60 transition-colors">

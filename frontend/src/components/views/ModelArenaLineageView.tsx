@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config';
 import { DashboardEvent } from '../../hooks/useDashboardSocket';
 
 interface ModelArenaLineageViewProps {
@@ -18,7 +19,7 @@ export default function ModelArenaLineageView({
   useEffect(() => {
     const fetchRegistry = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/predict/models');
+        const res = await fetch(`${API_BASE_URL}/api/predict/models`);
         if (res.ok) {
           const data = await res.json();
           const list = data.models || [];
@@ -244,7 +245,7 @@ export default function ModelArenaLineageView({
                   <td className="py-3 px-3 text-on-surface-variant">{item.latency}</td>
                   <td className="py-3 px-3 text-right">
                     <a
-                      href={`http://localhost:8000/api/experiments/download/${item.hash}`}
+                      href={`${API_BASE_URL}/api/experiments/download/${item.hash}`}
                       download
                       className="text-primary-container hover:underline"
                     >

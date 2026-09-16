@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config';
 
 interface ChampionCertificationViewProps {
   championData?: any;
@@ -23,7 +24,7 @@ export default function ChampionCertificationView({
   useEffect(() => {
     const fetchCertifiedInfo = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/predict/features');
+        const res = await fetch(`${API_BASE_URL}/api/predict/features`);
         if (res.ok) {
           const data = await res.json();
           setModelDetails(data);
@@ -68,7 +69,7 @@ export default function ChampionCertificationView({
     try {
       const formData = new FormData();
       formData.append('run_id', runId);
-      const res = await fetch('http://localhost:8000/api/experiments/approve', {
+      const res = await fetch(`${API_BASE_URL}/api/experiments/approve`, {
         method: 'POST',
         body: formData,
       });
@@ -93,7 +94,7 @@ export default function ChampionCertificationView({
     try {
       const formData = new FormData();
       formData.append('run_id', runId);
-      const res = await fetch('http://localhost:8000/api/experiments/reject', {
+      const res = await fetch(`${API_BASE_URL}/api/experiments/reject`, {
         method: 'POST',
         body: formData,
       });
@@ -463,7 +464,7 @@ export default function ChampionCertificationView({
               </button>
 
               <a
-                href={`http://localhost:8000/api/experiments/download/${runId}`}
+                href={`${API_BASE_URL}/api/experiments/download/${runId}`}
                 download
                 className="w-full py-2 px-4 rounded bg-surface-container-high hover:bg-surface-container-highest text-primary font-mono text-xs transition-all flex items-center justify-center gap-2 border border-outline-variant/30 text-center"
               >

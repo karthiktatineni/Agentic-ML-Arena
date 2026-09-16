@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!frontend/.env.example
 
 # Python bytecode & caches
 __pycache__/
@@ -44,7 +45,8 @@ yarn-error.log*
 data/runs/
 data/models/
 data/uploads/
-models/
+/models/
+!app/automl/models/
 # PDF Documents & Binaries
 *.pdf
 AutoML_Arena_Interview_and_Architecture_Mastery_Guide.pdf

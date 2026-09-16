@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config';
 
 interface ManualPredictionViewProps {
   initialModelId?: string | null;
@@ -40,7 +41,7 @@ export default function ManualPredictionView({ initialModelId }: ManualPredictio
     const fetchModels = async () => {
       setIsLoadingModels(true);
       try {
-        const res = await fetch('http://localhost:8000/api/predict/models');
+        const res = await fetch(`${API_BASE_URL}/api/predict/models`);
         if (res.ok) {
           const data = await res.json();
           const list = data.models || [];
@@ -70,7 +71,7 @@ export default function ManualPredictionView({ initialModelId }: ManualPredictio
       setPredictError(null);
       setPredictionResult(null);
       try {
-        const res = await fetch(`http://localhost:8000/api/predict/features?model_id=${selectedModelId}`);
+        const res = await fetch(`${API_BASE_URL}/api/predict/features?model_id=${selectedModelId}`);
         if (res.ok) {
           const data = await res.json();
           setModelDetails(data);
@@ -108,7 +109,7 @@ export default function ManualPredictionView({ initialModelId }: ManualPredictio
         features: featureValues,
         model_id: selectedModelId || undefined,
       };
-      const res = await fetch('http://localhost:8000/api/predict', {
+      const res = await fetch(`${API_BASE_URL}/api/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -138,7 +139,7 @@ export default function ManualPredictionView({ initialModelId }: ManualPredictio
     if (selectedModelId) formData.append('model_id', selectedModelId);
 
     try {
-      const res = await fetch('http://localhost:8000/api/predict/batch', {
+      const res = await fetch(`${API_BASE_URL}/api/predict/batch`, {
         method: 'POST',
         body: formData,
       });
@@ -154,8 +155,8 @@ export default function ManualPredictionView({ initialModelId }: ManualPredictio
   };
 
   const activeHash = modelDetails?.model_hash || selectedModelId;
-  const downloadJoblibUrl = `http://localhost:8000/api/experiments/download/${activeHash}`;
-  const downloadScriptUrl = `http://localhost:8000/api/experiments/download-script/${selectedModelId}`;
+  const downloadJoblibUrl = `${API_BASE_URL}/api/experiments/download/${activeHash}`;
+  const downloadScriptUrl = `${API_BASE_URL}/api/experiments/download-script/${selectedModelId}`;
 
   return (
     <div className="flex flex-col gap-6 w-full pb-12">

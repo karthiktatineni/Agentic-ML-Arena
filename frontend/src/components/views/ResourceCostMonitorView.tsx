@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../../config';
 
 interface TelemetryData {
   status: string;
@@ -37,7 +38,7 @@ export default function ResourceCostMonitorView() {
 
   const fetchTelemetry = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/system/telemetry');
+      const res = await fetch(`${API_BASE_URL}/api/system/telemetry`);
       if (res.ok) {
         const data = await res.json();
         setTelemetry(data);

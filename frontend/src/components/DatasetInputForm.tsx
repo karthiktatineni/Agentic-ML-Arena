@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { API_BASE_URL } from '../config';
 
 export default function DatasetInputForm() {
   const [file, setFile] = useState<File | null>(null);
@@ -55,7 +56,7 @@ export default function DatasetInputForm() {
       formData.append('file', file);
       formData.append('target_column', target);
 
-      const res = await fetch('http://localhost:8000/api/v1/experiments/run', {
+      const res = await fetch(`${API_BASE_URL}/api/v1/experiments/run`, {
         method: 'POST',
         body: formData,
       });
