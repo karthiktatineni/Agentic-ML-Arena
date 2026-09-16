@@ -60,7 +60,7 @@ flowchart TD
         RegistryDB["data/registry.json (Certified Registry)"]
     end
 
-    Arena -->|POST /run (CSV + Target)| REST
+    Arena -->|"POST /run (CSV + Target)"| REST
     REST --> Ingestion
     Ingestion --> Validator
     Validator --> Leakage
@@ -71,15 +71,15 @@ flowchart TD
     Splitter --> Controller
     Controller --> ModelArena
     ModelArena --> Gate6
-    Gate6 -->|Halt for Human Verification| Gatekeeper
-    Gatekeeper -->|POST /approve| RegistryDB
+    Gate6 -->|"Halt for Human Verification"| Gatekeeper
+    Gatekeeper -->|"POST /approve"| RegistryDB
     Gatekeeper --> RunsDir
     RunsDir --> JoblibBundle
     RunsDir --> DataSnapshot
     RunsDir --> PredictScript
     RegistryDB --> RegistryView
     JoblibBundle --> PredictionConsole
-    AGENTS -.->|Live Decision Events| WS
+    AGENTS -.->|"Live Decision Events"| WS
     WS -.-> RecentBuffer
     RecentBuffer -.-> Topology
 ```

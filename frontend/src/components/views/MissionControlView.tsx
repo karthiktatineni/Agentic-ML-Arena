@@ -42,6 +42,7 @@ export default function MissionControlView({
   const [isLocallyApproved, setIsLocallyApproved] = useState(false);
   const [isLocallyRejected, setIsLocallyRejected] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
 
   // Model Registry State
   const [registryModels, setRegistryModels] = useState<RegisteredModel[]>([]);
@@ -87,6 +88,13 @@ export default function MissionControlView({
     const timer = setInterval(fetchPendingAndRegistry, 4000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (Object.keys(pendingApprovals).length > 0 && !isLocallyApproved && !isLocallyRejected) {
+      setIsApprovalModalOpen(true);
+    }
+  }, [pendingApprovals]);
+
 
   const pendingKeys = Object.keys(pendingApprovals);
   const hasPendingApproval = pendingKeys.length > 0;
@@ -278,34 +286,114 @@ export default function MissionControlView({
 
   return (
     <div className="flex flex-col gap-6 w-full">
-      {/* 1. GATEKEEPER INTERLOCK CARD (Directly on Arena) */}
-      <section className="bg-surface-container-low rounded-xl p-6 border-2 border-outline-variant/60 shadow-2xl flex flex-col gap-5">
-        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
-          {/* Interlock Header & Details */}
-          <div className="flex flex-col gap-3 flex-1">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-tertiary-container/20 text-tertiary-fixed-dim border border-tertiary-container/30 shadow-md">
-                <span className="material-symbols-outlined text-[24px]">
-                  {effectiveApproved ? 'lock_open' : 'lock'}
+      {/* 1. COMPACT GATEKEEPER STATUS CHIP / BANNER */}
+      {hasPendingApproval && !effectiveApproved && !isLocallyRejected ? (
+        <div className="bg-surface-container-low border-2 border-primary-container/60 rounded-xl p-4 shadow-xl flex flex-wrap items-center justify-between gap-4 animate-pulse-subtle">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-primary-container/20 text-primary-container border border-primary-container/40 flex items-center justify-center shrink-0 shadow-md">
+              <span className="material-symbols-outlined text-[24px]">gavel</span>
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-primary-container text-on-primary-container text-[10px] font-mono font-bold uppercase tracking-wider">
+                  Gate 6 Certified
+                </span>
+                <span className="text-xs font-mono font-bold text-primary">
+                  RUN: {activePendingRunId}
                 </span>
               </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-tertiary-fixed-dim font-mono font-bold uppercase tracking-wider">
-                    GATEKEEPER INTERLOCK
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-surface-container-high text-[10px] font-mono text-on-surface-variant border border-outline-variant/40">
-                    RUN: {activePendingRunId}
+              <p className="text-xs text-on-surface font-mono mt-0.5">
+                Champion: <strong className="text-primary">{candidateModelName}</strong> &bull; Score: <strong className="text-primary-container">{Number(candidateScore).toFixed(4)}</strong> &bull; Awaiting Human Authorization
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsApprovalModalOpen(true)}
+              className="px-4 py-2 rounded-lg bg-primary-container text-on-primary-container hover:brightness-110 font-mono text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[18px]">verified_user</span>
+              <span>Review &amp; Authorize</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleReject}
+              disabled={isProcessingApproval}
+              className="px-3 py-2 rounded-lg bg-surface-container hover:bg-error-container/20 text-error font-mono text-xs transition-all border border-outline-variant/30 flex items-center gap-1 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">cancel</span>
+              <span>Reject</span>
+            </button>
+          </div>
+        </div>
+      ) : effectiveApproved ? (
+        <div className="bg-surface-container-low border border-primary-container/40 rounded-xl px-4 py-2.5 shadow-md flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <span className="material-symbols-outlined text-primary-container text-[20px]">check_circle</span>
+            <span className="text-xs font-mono text-on-surface">
+              Gatekeeper Status: <strong className="text-primary">Canary 10% Active</strong> (Run: <span className="text-primary-container">{activePendingRunId}</span> &bull; {candidateModelName})
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsApprovalModalOpen(true)}
+            className="text-[11px] font-mono text-primary hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <span>View Signatures &amp; Target Specs</span>
+            <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+          </button>
+        </div>
+      ) : isLocallyRejected ? (
+        <div className="bg-surface-container-low border border-error-container/40 rounded-xl px-4 py-2.5 shadow-md flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5 text-error">
+            <span className="material-symbols-outlined text-[20px]">cancel</span>
+            <span className="text-xs font-mono">
+              Gatekeeper Status: Candidate rejected to search pool.
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ON-DEMAND HITL APPROVAL MODAL */}
+      {isApprovalModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-surface-container-low border-2 border-primary-container/60 rounded-2xl shadow-2xl p-6 max-w-2xl w-full flex flex-col gap-5 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-4 border-b border-outline-variant/30 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-primary-container/20 text-primary-container border border-primary-container/30 flex items-center justify-center shadow-md">
+                  <span className="material-symbols-outlined text-[24px]">
+                    {effectiveApproved ? 'lock_open' : 'lock'}
                   </span>
                 </div>
-                <h2 className="text-xl text-primary font-bold leading-tight">
-                  {effectiveApproved
-                    ? 'Canary Deployed & Certified'
-                    : isLocallyRejected
-                    ? 'Rejected to Search Pool'
-                    : 'Awaiting Human Approval'}
-                </h2>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-tertiary-fixed-dim font-mono font-bold uppercase tracking-wider">
+                      GATEKEEPER INTERLOCK
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-surface-container-high text-[10px] font-mono text-on-surface-variant border border-outline-variant/40">
+                      RUN: {activePendingRunId}
+                    </span>
+                  </div>
+                  <h2 className="text-lg text-primary font-bold">
+                    {effectiveApproved
+                      ? 'Canary Deployed & Certified'
+                      : isLocallyRejected
+                      ? 'Rejected to Search Pool'
+                      : 'Human-in-the-Loop Authorization Required'}
+                  </h2>
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setIsApprovalModalOpen(false)}
+                className="w-8 h-8 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
             </div>
 
             {/* Candidate Spec Strip */}
@@ -339,64 +427,23 @@ export default function MissionControlView({
                 {actionMessage}
               </div>
             )}
-          </div>
 
-          {/* Action Buttons & Signature Trail (Right Panel) */}
-          <div className="flex flex-col gap-3 min-w-[320px]">
-            {/* Primary Action Buttons */}
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={handleApprove}
-                disabled={effectiveApproved || isLocallyRejected || isProcessingApproval}
-                className={`w-full py-3 px-4 rounded-lg font-mono text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-lg ${
-                  effectiveApproved
-                    ? 'bg-surface-container-high text-primary-container cursor-not-allowed border border-primary-container/40'
-                    : 'bg-primary-container text-on-primary-container hover:brightness-110 active:scale-[0.98] shadow-primary-container/20 cursor-pointer'
-                }`}
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  {effectiveApproved ? 'verified' : 'rocket_launch'}
-                </span>
-                <span>{effectiveApproved ? 'Canary Deployed & Live (10%)' : 'Approve & Trigger Canary Deploy'}</span>
-              </button>
-
-              <button
-                onClick={handleReject}
-                disabled={effectiveApproved || isLocallyRejected || isProcessingApproval}
-                className="w-full py-2 px-4 rounded-lg bg-error-container/20 hover:bg-error-container text-error hover:text-on-error font-mono text-xs transition-all flex items-center justify-center gap-2 border border-error-container/30 cursor-pointer"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[18px]">cancel</span>
-                <span>Reject to Search Pool</span>
-              </button>
-
-              <a
-                href={`http://localhost:8000/api/experiments/download/${activePendingRunId}`}
-                download
-                className="w-full py-2 px-4 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-primary font-mono text-xs transition-all flex items-center justify-center gap-2 border border-outline-variant/30 text-center"
-              >
-                <span className="material-symbols-outlined text-[18px]">download</span>
-                <span>Download Certified Model (.joblib)</span>
-              </a>
-            </div>
-
-            {/* Cryptographic Signature Trail Card */}
-            <div className="p-3 rounded-lg bg-surface-container-lowest flex flex-col gap-2 border border-outline-variant/30 font-mono text-xs">
+            {/* Cryptographic Signature Trail */}
+            <div className="p-3.5 rounded-lg bg-surface-container-lowest flex flex-col gap-2.5 border border-outline-variant/30 font-mono text-xs">
               <span className="text-[10px] text-on-surface-variant uppercase tracking-widest font-semibold">
                 Cryptographic Signature Trail
               </span>
               <div className="flex items-center justify-between text-on-surface py-1 border-b border-outline-variant/20">
                 <div className="flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-primary-container text-[14px]">check_circle</span>
+                  <span className="material-symbols-outlined text-primary-container text-[16px]">check_circle</span>
                   <span>Autonomous Bot v2.1</span>
                 </div>
-                <span className="text-primary-container">SIGNED (04:12:08 UTC)</span>
+                <span className="text-primary-container font-bold">SIGNED (04:12:08 UTC)</span>
               </div>
               <div className="flex items-center justify-between text-on-surface py-1">
                 <div className="flex items-center gap-1.5">
                   <span
-                    className={`material-symbols-outlined text-[14px] ${
+                    className={`material-symbols-outlined text-[16px] ${
                       effectiveApproved ? 'text-primary-container' : 'text-tertiary-fixed-dim animate-pulse'
                     }`}
                   >
@@ -413,32 +460,67 @@ export default function MissionControlView({
                 </span>
               </div>
             </div>
+
+            {/* Deployment Target Spec Strip */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+              <div className="bg-surface-container p-3 rounded-lg flex flex-col gap-0.5">
+                <span className="text-[10px] text-on-surface-variant uppercase">Target Routing</span>
+                <span className="text-primary font-bold">10% Canary / 90% Stable</span>
+              </div>
+              <div className="bg-surface-container p-3 rounded-lg flex flex-col gap-0.5">
+                <span className="text-[10px] text-on-surface-variant uppercase">Production Endpoint</span>
+                <span className="text-primary-container font-bold truncate">/api/predict</span>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-outline-variant/30">
+              <a
+                href={`http://localhost:8000/api/experiments/download/${activePendingRunId}`}
+                download
+                className="w-full sm:w-auto px-3.5 py-2.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-primary font-mono text-xs transition-all flex items-center justify-center gap-1.5 border border-outline-variant/30 text-center"
+              >
+                <span className="material-symbols-outlined text-[16px]">download</span>
+                <span>Download .joblib</span>
+              </a>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleReject();
+                    setIsApprovalModalOpen(false);
+                  }}
+                  disabled={effectiveApproved || isLocallyRejected || isProcessingApproval}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 rounded-lg bg-error-container/20 hover:bg-error-container text-error hover:text-on-error font-mono text-xs transition-all flex items-center justify-center gap-1.5 border border-error-container/30 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">cancel</span>
+                  <span>Reject</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleApprove();
+                    setIsApprovalModalOpen(false);
+                  }}
+                  disabled={effectiveApproved || isLocallyRejected || isProcessingApproval}
+                  className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-lg font-mono text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-lg ${
+                    effectiveApproved
+                      ? 'bg-surface-container-high text-primary-container cursor-not-allowed border border-primary-container/40'
+                      : 'bg-primary-container text-on-primary-container hover:brightness-110 active:scale-[0.98] shadow-primary-container/20 cursor-pointer'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    {effectiveApproved ? 'verified' : 'rocket_launch'}
+                  </span>
+                  <span>{effectiveApproved ? 'Canary Active (10%)' : 'Approve & Canary Deploy'}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-
-        {/* Target Canary Deployment Architecture Strip */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3 border-t border-outline-variant/30 font-mono text-xs">
-          <div className="bg-surface-container p-3 rounded-lg flex flex-col gap-1">
-            <span className="text-[10px] text-on-surface-variant uppercase">Deployment Target</span>
-            <span className="text-primary font-bold">
-              {effectiveApproved ? 'PRODUCTION ACTIVE (Canary 10%)' : 'Approved — Deployed (Canary 10%)'}
-            </span>
-            <span className="text-[11px] text-on-surface-variant/80">Cluster Traffic Routing: 10% Canary / 90% Stable</span>
-          </div>
-
-          <div className="bg-surface-container p-3 rounded-lg flex flex-col gap-1">
-            <span className="text-[10px] text-on-surface-variant uppercase">Production Endpoint</span>
-            <span className="text-primary-container font-bold truncate">http://localhost:8000/api/predict</span>
-            <span className="text-[11px] text-on-surface-variant/80">High-Throughput Sub-5ms SLA</span>
-          </div>
-
-          <div className="bg-surface-container p-3 rounded-lg flex flex-col gap-1">
-            <span className="text-[10px] text-on-surface-variant uppercase">Runtime Engine</span>
-            <span className="text-on-surface font-semibold">FastAPI Async / Joblib Bundle</span>
-            <span className="text-[11px] text-on-surface-variant/80">Stateless Cloud Run Ready</span>
-          </div>
-        </div>
-      </section>
+      )}
 
       {/* 2. Upload Dataset & Launch Banner */}
       <section className="bg-surface-container-low rounded-xl p-5 border border-outline-variant/40 shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
@@ -881,6 +963,80 @@ export default function MissionControlView({
           </div>
         </div>
       </div>
+
+      {/* 4b. COLLAPSIBLE AUDIT TRAIL & CANARY DEPLOYMENT SPECS */}
+      <details className="group bg-surface-container-low rounded-xl border border-outline-variant/40 shadow-xl overflow-hidden">
+        <summary className="flex items-center justify-between p-4 cursor-pointer hover:bg-surface-container/50 select-none text-xs font-mono font-bold text-on-surface">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[20px] text-tertiary-fixed-dim">verified_user</span>
+            <span>Cryptographic Signature Trail &amp; Canary Target Architecture</span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-surface-container text-on-surface-variant font-normal">
+              Audit Specifications
+            </span>
+          </div>
+          <div className="flex items-center gap-1 text-on-surface-variant text-[11px]">
+            <span className="group-open:hidden">Expand</span>
+            <span className="hidden group-open:inline">Collapse</span>
+            <span className="material-symbols-outlined text-[18px] transition-transform group-open:rotate-180">
+              expand_more
+            </span>
+          </div>
+        </summary>
+
+        <div className="p-5 border-t border-outline-variant/30 flex flex-col gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Cryptographic Signature Trail */}
+            <div className="p-4 rounded-lg bg-surface-container-lowest flex flex-col gap-2.5 border border-outline-variant/30 font-mono text-xs">
+              <span className="text-[10px] text-on-surface-variant uppercase tracking-widest font-semibold">
+                Cryptographic Signature Trail
+              </span>
+              <div className="flex items-center justify-between text-on-surface py-1.5 border-b border-outline-variant/20">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary-container text-[16px]">check_circle</span>
+                  <span>Autonomous Bot v2.1</span>
+                </div>
+                <span className="text-primary-container font-bold">SIGNED (04:12:08 UTC)</span>
+              </div>
+              <div className="flex items-center justify-between text-on-surface py-1.5">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`material-symbols-outlined text-[16px] ${
+                      effectiveApproved ? 'text-primary-container' : 'text-tertiary-fixed-dim animate-pulse'
+                    }`}
+                  >
+                    {effectiveApproved ? 'check_circle' : 'pending'}
+                  </span>
+                  <span>Authorized System Operator</span>
+                </div>
+                <span
+                  className={
+                    effectiveApproved ? 'text-primary-container font-bold' : 'text-tertiary-fixed-dim font-bold'
+                  }
+                >
+                  {effectiveApproved ? 'SIGNED' : 'PENDING AUTH'}
+                </span>
+              </div>
+            </div>
+
+            {/* Target Canary Deployment Specs */}
+            <div className="grid grid-cols-1 gap-2.5 font-mono text-xs">
+              <div className="bg-surface-container p-3 rounded-lg flex flex-col gap-0.5">
+                <span className="text-[10px] text-on-surface-variant uppercase">Deployment Target</span>
+                <span className="text-primary font-bold">
+                  {effectiveApproved ? 'PRODUCTION ACTIVE (Canary 10%)' : 'Approved — Deployed (Canary 10%)'}
+                </span>
+                <span className="text-[11px] text-on-surface-variant/80">Cluster Traffic Routing: 10% Canary / 90% Stable</span>
+              </div>
+
+              <div className="bg-surface-container p-3 rounded-lg flex flex-col gap-0.5">
+                <span className="text-[10px] text-on-surface-variant uppercase">Production Endpoint</span>
+                <span className="text-primary-container font-bold truncate">http://localhost:8000/api/predict</span>
+                <span className="text-[11px] text-on-surface-variant/80">High-Throughput Sub-5ms SLA &bull; Stateless Cloud Run Ready</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
 
       {/* 5. CERTIFIED MODEL REGISTRY & 1-CLICK DOWNLOADS */}
       <section className="bg-surface-container-low rounded-xl p-5 border border-outline-variant/40 shadow-xl flex flex-col gap-4">

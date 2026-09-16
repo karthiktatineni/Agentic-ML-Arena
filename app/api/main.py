@@ -42,6 +42,28 @@ app.include_router(ws.router, prefix="/api/ws", tags=["websocket-alias"])
 app.include_router(experiments.router, prefix="/api/experiments", tags=["experiments-alias"])
 app.include_router(system.router, prefix="/api/system", tags=["system-alias"])
 
+# Direct /api/models endpoints for Registry & Schema compliance
+@app.get("/api/models", tags=["models-root"])
+async def get_models_root():
+    return await predict.list_models()
+
+@app.delete("/api/models/{identifier}", tags=["models-root"])
+async def delete_model_root(identifier: str):
+    return await experiments.delete_model(identifier)
+
+@app.get("/api/models/{run_id}/schema", tags=["models-root"])
+async def get_model_schema_root(run_id: str):
+    return await predict.get_model_schema_by_run_id(run_id)
+
+@app.get("/api/models/{run_id}/download", tags=["models-root"])
+async def download_model_root(run_id: str):
+    return await experiments.download_model(run_id)
+
+@app.get("/api/models/{run_id}/dataset", tags=["models-root"])
+async def download_dataset_root(run_id: str):
+    return await experiments.download_dataset(run_id=run_id)
+
+
 if __name__ == "__main__":
     import uvicorn
     # Typically run via `uvicorn app.api.main:app`

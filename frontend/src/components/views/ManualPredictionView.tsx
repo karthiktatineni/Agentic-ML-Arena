@@ -88,9 +88,12 @@ export default function ManualPredictionView({ initialModelId }: ManualPredictio
   }, [selectedModelId]);
 
   const handleInputChange = (feat: string, val: string) => {
-    // Try to parse numeric if possible
-    const num = Number(val);
-    const parsed = !isNaN(num) && val.trim() !== '' ? num : val;
+    const isCat = modelDetails?.categorical_columns && Array.isArray(modelDetails.categorical_columns[feat]);
+    let parsed: any = val;
+    if (!isCat) {
+      const num = Number(val);
+      parsed = !isNaN(num) && val.trim() !== '' ? num : val;
+    }
     setFeatureValues((prev) => ({
       ...prev,
       [feat]: parsed,
@@ -274,18 +277,47 @@ export default function ManualPredictionView({ initialModelId }: ManualPredictio
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {modelDetails.feature_names.map((feat: string) => {
                   const val = featureValues[feat] !== undefined ? featureValues[feat] : '';
+                  const catOptions = modelDetails.categorical_columns && modelDetails.categorical_columns[feat];
+                  const isCategorical = Array.isArray(catOptions) && catOptions.length > 0;
+
                   return (
                     <div key={feat} className="flex flex-col gap-1.5 bg-surface-container p-3 rounded-lg border border-outline-variant/30">
-                      <label className="text-xs font-mono font-semibold text-primary truncate" title={feat}>
-                        {feat}
-                      </label>
-                      <input
-                        type="text"
-                        value={val}
-                        onChange={(e) => handleInputChange(feat, e.target.value)}
-                        placeholder="0"
-                        className="bg-surface-container-high px-3 py-1.5 rounded text-xs font-mono text-on-surface focus:outline-none focus:border-primary-container border border-outline-variant/40"
-                      />
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-mono font-semibold text-primary truncate" title={feat}>
+                          {feat}
+                        </label>
+                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                          isCategorical
+                            ? 'bg-secondary-container/30 text-secondary border border-secondary-container/40'
+                            : 'bg-surface-container-high text-on-surface-variant'
+                        }`}>
+                          {isCategorical ? 'Categorical' : 'Numeric'}
+                        </span>
+                      </div>
+
+                      {isCategorical ? (
+                        <select
+                          value={String(val)}
+                          onChange={(e) => handleInputChange(feat, e.target.value)}
+                          className="bg-surface-container-high px-3 py-2 rounded text-xs font-mono text-primary font-semibold focus:outline-none focus:border-primary-container border border-outline-variant/40 cursor-pointer"
+                        >
+                          <option value="" disabled>Select {feat}...</option>
+                          {catOptions.map((opt: any) => (
+                            <option key={String(opt)} value={String(opt)}>
+                              {String(opt)}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="number"
+                          step="any"
+                          value={val}
+                          onChange={(e) => handleInputChange(feat, e.target.value)}
+                          placeholder="0"
+                          className="bg-surface-container-high px-3 py-2 rounded text-xs font-mono text-on-surface focus:outline-none focus:border-primary-container border border-outline-variant/40"
+                        />
+                      )}
                     </div>
                   );
                 })}

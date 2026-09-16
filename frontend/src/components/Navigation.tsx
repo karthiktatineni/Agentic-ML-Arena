@@ -4,6 +4,7 @@ import React from 'react';
 
 export type NavTab = 
   | 'mission-control' 
+  | 'model-registry'
   | 'model-arena-lineage' 
   | 'champion-certification' 
   | 'manual-prediction' 
@@ -16,6 +17,7 @@ interface NavigationProps {
   activeRunId?: string;
   bestScore?: number;
   modelsExploredCount?: number;
+  isPaused?: boolean;
   onPause?: () => void;
   onAbort?: () => void;
 }
@@ -27,16 +29,19 @@ export default function Navigation({
   activeRunId = 'Alpha-Run-2026',
   bestScore = 0.9412,
   modelsExploredCount = 8,
+  isPaused = false,
   onPause,
   onAbort,
 }: NavigationProps) {
   const navItems: { id: NavTab; label: string; icon: string; pulse?: boolean }[] = [
     { id: 'mission-control', label: 'Arena', icon: 'radar', pulse: true },
+    { id: 'model-registry', label: 'Model Registry', icon: 'inventory_2' },
     { id: 'model-arena-lineage', label: 'Model Arena & Lineage', icon: 'account_tree' },
     { id: 'champion-certification', label: 'Champion Certification', icon: 'verified' },
     { id: 'manual-prediction', label: 'Manual Prediction', icon: 'psychology' },
     { id: 'resource-cost-monitor', label: 'Resource & Cost Monitor', icon: 'query_stats' },
   ];
+
 
   return (
     <>
@@ -100,19 +105,32 @@ export default function Navigation({
             <div className="flex items-center gap-2">
               <button
                 onClick={onPause}
-                className="px-3 py-1.5 rounded border border-tertiary-container/40 bg-surface-container-high/40 text-tertiary text-xs font-mono hover:bg-surface-container-high transition-all"
+                className={`px-3 py-1.5 rounded border text-xs font-mono transition-all flex items-center gap-1.5 ${
+                  isPaused 
+                    ? 'border-amber-500/60 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' 
+                    : 'border-tertiary-container/40 bg-surface-container-high/40 text-tertiary hover:bg-surface-container-high'
+                }`}
                 type="button"
+                title={isPaused ? "Resume the training loop" : "Pause the training loop"}
               >
-                Pause Experiment
+                <span className="material-symbols-outlined text-[14px]">{isPaused ? 'play_arrow' : 'pause'}</span>
+                <span>{isPaused ? 'Resume Experiment' : 'Pause Experiment'}</span>
               </button>
               <button
-                onClick={onAbort}
-                className="px-3 py-1.5 rounded border border-error-container/60 bg-error-container/10 text-error text-xs font-mono hover:bg-error-container hover:text-on-error transition-all"
+                onClick={() => {
+                  if (window.confirm("Are you sure you want to trigger Emergency Abort? This will immediately terminate the active experiment.")) {
+                    if (onAbort) onAbort();
+                  }
+                }}
+                className="px-3 py-1.5 rounded border border-error-container/60 bg-error-container/10 text-error text-xs font-mono hover:bg-error-container hover:text-on-error transition-all flex items-center gap-1.5"
                 type="button"
+                title="Immediately abort the active training loop"
               >
-                Emergency Abort
+                <span className="material-symbols-outlined text-[14px]">cancel</span>
+                <span>Emergency Abort</span>
               </button>
             </div>
+
             <div className="flex items-center gap-2 pl-2 border-l border-outline-variant/40">
               <div className="flex flex-col text-right hidden sm:flex">
                 <span className="text-xs text-on-surface font-semibold leading-tight font-mono">System Operator</span>

@@ -30,6 +30,21 @@ REGISTRY_FILE = Path("data/registry.json")
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 
+_experiment_state = {
+    "is_paused": False,
+    "is_aborted": False,
+    "active_run_id": None,
+}
+
+async def _check_pause_or_abort():
+    if _experiment_state.get("is_aborted", False):
+        raise asyncio.CancelledError("Pipeline aborted by operator")
+    while _experiment_state.get("is_paused", False):
+        await asyncio.sleep(0.5)
+        if _experiment_state.get("is_aborted", False):
+            raise asyncio.CancelledError("Pipeline aborted by operator")
+
+
 
 def _load_pending_approvals() -> Dict[str, Any]:
     """Read pending approvals from JSON (test-compatible), with SQLite fallback."""
@@ -93,12 +108,18 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             primary_metric="f1"
         )
         run_id = config.run_id or "api_run"
+        _experiment_state["active_run_id"] = run_id
+        _experiment_state["is_aborted"] = False
+        _experiment_state["is_paused"] = False
 
         from app.governance.llm_governor import global_governor
         global_governor.reset()
         
+        await _check_pause_or_abort()
+        
         # 1. Ingestion & PII Scanning
         _emit_stage("Ingestion", "START")
+
         if not os.path.exists(dataset_path):
             _emit_stage("Ingestion", "FAILED")
             logger.error(f"Dataset path not found: {dataset_path}")
@@ -363,6 +384,7 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             trained_models = {}
             
             for name, model_def in models_to_test:
+                await _check_pause_or_abort()
                 action = controller.select_action(state)
                 if action == "STOP":
                     break
@@ -507,9 +529,36 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             except ImportError:
                 pass
 
+            categorical_features = {}
+            # Extract categorical columns and their unique options
+            for col in feature_names:
+                if col in df_base.columns:
+                    s = df_base[col].dropna()
+                    if s.dtype == 'object' or s.dtype.name == 'string' or (pd.api.types.is_numeric_dtype(s) and s.nunique() <= 10):
+                        categorical_features[col] = [str(v) for v in s.unique().tolist()][:50]
+            
+            # Also extract from fitted OneHotEncoder if available
+            trained_model_obj = trained_models.get(champion.experiment_hash)
+            if hasattr(trained_model_obj, "named_steps") and "preprocessor" in trained_model_obj.named_steps:
+                pre = trained_model_obj.named_steps["preprocessor"]
+                if hasattr(pre, "named_transformers_") and "cat" in pre.named_transformers_:
+                    cat_trans = pre.named_transformers_["cat"]
+                    if hasattr(cat_trans, "named_steps") and "onehot" in cat_trans.named_steps:
+                        ohe = cat_trans.named_steps["onehot"]
+                        for trans in pre.transformers_:
+                            if trans[0] == "cat" and len(trans) >= 3:
+                                cat_cols_list = trans[2]
+                                if hasattr(ohe, "categories_"):
+                                    for col_name, cats in zip(cat_cols_list, ohe.categories_):
+                                        categorical_features[col_name] = [str(c) for c in cats.tolist()]
+
             bundle = {
                 "model": trained_models.get(champion.experiment_hash),
                 "feature_names": feature_names,
+                "categorical_features": categorical_features,
+                "categorical_columns": list(categorical_features.keys()),
+                "numeric_columns": [c for c in feature_names if c not in categorical_features],
+                "category_values": categorical_features,
                 "model_name": champion.model_family,
                 "run_id": run_id,
                 "hyperparameters": champion.hyperparameters,
@@ -519,6 +568,7 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
                 "pipeline_attempt": attempt,
                 "dependencies": bundle_dependencies,
             }
+
 
             # Track as best valid candidate across all attempts
             if champion_score > best_valid_score:
@@ -659,9 +709,15 @@ async def _run_search_loop_task(dataset_path: str, target_column: str):
             run_joblib_path = run_artifacts_dir / f"{certified_champion.experiment_hash}.joblib"
             atomic_joblib_dump(certified_bundle, run_joblib_path)
             
-            # Copy input CSV
+            # Copy input CSV to run folder and models folder
             if os.path.exists(dataset_path):
                 shutil.copy(dataset_path, run_artifacts_dir / "dataset.csv")
+                models_run_dir = Path(f"models/{run_id}")
+                models_run_dir.mkdir(parents=True, exist_ok=True)
+                atomic_joblib_dump(certified_bundle, models_run_dir / "model.joblib")
+                shutil.copy(dataset_path, models_run_dir / "train_data.csv")
+                logger.info(f"Persisted training dataset and model bundle to {models_run_dir}")
+
 
             # Generate tailored standalone predict.py
             predict_script_path = run_artifacts_dir / "predict.py"
@@ -883,25 +939,215 @@ async def get_pending_approvals():
 
 from fastapi.responses import FileResponse
 
-@router.get("/download/{model_hash}")
-async def download_model(model_hash: str):
+@router.get("/status/controls")
+async def get_controls_status():
+    return _experiment_state
+
+@router.post("/{run_id}/pause")
+@router.post("/pause")
+async def pause_experiment(run_id: Optional[str] = None):
+    _experiment_state["is_paused"] = not _experiment_state.get("is_paused", False)
+    status_str = "PAUSED" if _experiment_state["is_paused"] else "RESUMED"
+    _emit_stage("Search Loop", status_str, metadata={"is_paused": _experiment_state["is_paused"]}, run_id=run_id or "api_run")
+    logger.info(f"Experiment pause state changed: {_experiment_state['is_paused']}")
+    return {"status": "success", "is_paused": _experiment_state["is_paused"], "message": f"Experiment {status_str}"}
+
+@router.post("/{run_id}/abort")
+@router.post("/abort")
+async def abort_experiment(run_id: Optional[str] = None):
+    _experiment_state["is_aborted"] = True
+    _experiment_state["is_paused"] = False
+    _emit_stage("Pipeline", "ABORTED", metadata={"reason": "Emergency abort requested by operator"}, run_id=run_id or "api_run")
+    _emit_stage("Search Loop", "ABORTED", metadata={"reason": "Emergency abort requested by operator"}, run_id=run_id or "api_run")
+    logger.warning("Emergency abort triggered by operator.")
+    return {"status": "aborted", "message": "Emergency abort executed successfully"}
+
+
+@router.post("/reset-controls")
+async def reset_controls():
+    _experiment_state["is_aborted"] = False
+    _experiment_state["is_paused"] = False
+    return {"status": "ready"}
+
+@router.get("/download/{identifier}")
+async def download_model(identifier: str):
+    """Download .joblib model bundle by model hash, filename, or run_id."""
+    clean_id = identifier.replace(".joblib", "")
+    
+    # 1. Direct run folder: data/runs/{identifier}/*.joblib
+    run_folder = Path("data/runs") / clean_id
+    if run_folder.exists() and run_folder.is_dir():
+        joblibs = list(run_folder.glob("*.joblib"))
+        if joblibs:
+            joblibs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            return FileResponse(joblibs[0], filename=joblibs[0].name, media_type="application/octet-stream")
+
+    # 2. Check direct path in data/models or data/runs
     for folder in [Path("data/models"), Path("data/runs")]:
-        direct = folder / f"{model_hash}.joblib"
+        direct = folder / f"{clean_id}.joblib"
         if direct.exists():
-            return FileResponse(direct, filename=f"{model_hash}.joblib", media_type="application/octet-stream")
-        matches = list(folder.glob(f"**/*{model_hash}*.joblib"))
+            return FileResponse(direct, filename=f"{clean_id}.joblib", media_type="application/octet-stream")
+        direct_raw = folder / clean_id
+        if direct_raw.is_file():
+            return FileResponse(direct_raw, filename=direct_raw.name, media_type="application/octet-stream")
+        matches = list(folder.glob(f"**/*{clean_id}*.joblib"))
         if matches:
             return FileResponse(matches[0], filename=matches[0].name, media_type="application/octet-stream")
-    raise HTTPException(status_code=404, detail=f"Model bundle '{model_hash}' not found")
 
-@router.get("/download-script/{run_id}")
-async def download_script(run_id: str):
-    for folder in [Path("data/runs") / run_id, Path("data/runs")]:
-        script = folder / "predict.py"
-        if script.exists():
-            return FileResponse(script, filename="predict.py", media_type="text/x-python")
-        matches = list(folder.glob("**/predict.py"))
-        if matches:
-            return FileResponse(matches[0], filename="predict.py", media_type="text/x-python")
-    raise HTTPException(status_code=404, detail=f"Prediction script for run '{run_id}' not found")
+    # 3. Check registry.json to see if identifier matches run_id or experiment_hash
+    if REGISTRY_FILE.exists():
+        try:
+            with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
+                registry = json.load(f)
+            for entry in registry:
+                champ = entry.get("champion", {})
+                if entry.get("run_id") == clean_id or champ.get("experiment_hash") == clean_id:
+                    joblib_p = Path(entry.get("joblib_path", ""))
+                    if joblib_p.exists():
+                        return FileResponse(joblib_p, filename=joblib_p.name, media_type="application/octet-stream")
+                    r_id = entry.get("run_id")
+                    if r_id:
+                        r_jobs = list((Path("data/runs") / r_id).glob("*.joblib"))
+                        if r_jobs:
+                            return FileResponse(r_jobs[0], filename=r_jobs[0].name, media_type="application/octet-stream")
+        except Exception as e:
+            logger.error(f"Error checking registry for download: {e}")
+
+    raise HTTPException(status_code=404, detail=f"Model bundle '{identifier}' not found")
+
+@router.get("/download/{run_id}/dataset")
+@router.get("/download-dataset/{identifier}")
+async def download_dataset(identifier: Optional[str] = None, run_id: Optional[str] = None):
+    """Download the trained dataset.csv associated with a run_id or model_hash."""
+    target = (run_id or identifier or "").replace(".csv", "").replace(".joblib", "")
+    clean_id = target
+
+    
+    # 1. Direct run folder: data/runs/{clean_id}/dataset.csv
+    run_folder = Path("data/runs") / clean_id
+    if run_folder.exists() and (run_folder / "dataset.csv").exists():
+        return FileResponse(run_folder / "dataset.csv", filename=f"dataset_{clean_id}.csv", media_type="text/csv")
+        
+    # 2. Check registry by run_id or model_hash
+    if REGISTRY_FILE.exists():
+        try:
+            with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
+                registry = json.load(f)
+            for entry in registry:
+                champ = entry.get("champion", {})
+                if entry.get("run_id") == clean_id or champ.get("experiment_hash") == clean_id:
+                    r_id = entry.get("run_id")
+                    ds_file = Path(f"data/runs/{r_id}/dataset.csv")
+                    if ds_file.exists():
+                        return FileResponse(ds_file, filename=f"dataset_{r_id}.csv", media_type="text/csv")
+        except Exception:
+            pass
+
+    # 3. Glob any matching dataset.csv in data/runs
+    matches = list(Path("data/runs").glob(f"**/*{clean_id}*/dataset.csv")) + list(Path("data/runs").glob("**/dataset.csv"))
+    if matches:
+        return FileResponse(matches[0], filename=matches[0].name, media_type="text/csv")
+
+    raise HTTPException(status_code=404, detail=f"Trained dataset for '{identifier}' not found")
+
+@router.get("/download-script/{identifier}")
+async def download_script(identifier: str):
+    """Download predict.py standalone script by run_id or model_hash."""
+    clean_id = identifier.replace(".py", "")
+    run_folder = Path("data/runs") / clean_id
+    if run_folder.exists() and (run_folder / "predict.py").exists():
+        return FileResponse(run_folder / "predict.py", filename="predict.py", media_type="text/x-python")
+
+    if REGISTRY_FILE.exists():
+        try:
+            with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
+                registry = json.load(f)
+            for entry in registry:
+                champ = entry.get("champion", {})
+                if entry.get("run_id") == clean_id or champ.get("experiment_hash") == clean_id:
+                    r_id = entry.get("run_id")
+                    sc = Path(f"data/runs/{r_id}/predict.py")
+                    if sc.exists():
+                        return FileResponse(sc, filename="predict.py", media_type="text/x-python")
+        except Exception:
+            pass
+
+    matches = list(Path("data/runs").glob("**/predict.py"))
+    if matches:
+        return FileResponse(matches[0], filename="predict.py", media_type="text/x-python")
+
+    raise HTTPException(status_code=404, detail=f"Prediction script for run '{identifier}' not found")
+
+@router.delete("/models/{identifier}")
+async def delete_model(identifier: str):
+    """Delete model from registry, pending approvals, and local disk artifacts."""
+    deleted_from_registry = False
+    deleted_files = []
+    clean_id = identifier.replace(".joblib", "")
+
+    # 1. Remove from registry.json
+    if REGISTRY_FILE.exists():
+        try:
+            with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
+                reg = json.load(f)
+            original_len = len(reg)
+            reg = [
+                entry for entry in reg 
+                if entry.get("run_id") != clean_id and 
+                   entry.get("champion", {}).get("experiment_hash") != clean_id
+            ]
+            if len(reg) < original_len:
+                deleted_from_registry = True
+                with open(REGISTRY_FILE, "w", encoding="utf-8") as f:
+                    json.dump(reg, f, indent=2, default=str)
+        except Exception as e:
+            logger.error(f"Error removing model from registry.json: {e}")
+
+    # 1b. Remove from SQLite registry & pending if active
+    try:
+        from app.core.database import get_db_session
+        from app.db.models import ModelRegistryRecord, PendingApprovalRecord
+        with get_db_session() as db:
+            recs = db.query(ModelRegistryRecord).filter(
+                (ModelRegistryRecord.run_id == clean_id) | (ModelRegistryRecord.experiment_hash == clean_id)
+            ).all()
+            for r in recs:
+                db.delete(r)
+                deleted_from_registry = True
+            p_recs = db.query(PendingApprovalRecord).filter(
+                (PendingApprovalRecord.run_id == clean_id) | (PendingApprovalRecord.model_hash == clean_id)
+            ).all()
+            for pr in p_recs:
+                db.delete(pr)
+    except Exception as e:
+        logger.debug(f"SQLite cleanup: {e}")
+
+    # 2. Remove from pending approvals
+    pending = _load_pending_approvals()
+    if clean_id in pending:
+        del pending[clean_id]
+        _save_pending_approvals(pending)
+
+    # 3. Clean up files in data/runs/{clean_id} and models/{clean_id}
+    for d in [Path("data/runs") / clean_id, Path("models") / clean_id]:
+        if d.exists() and d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+            deleted_files.append(str(d))
+
+    # 4. Clean up matching .joblib in data/models or data/runs
+    for folder in [Path("data/models"), Path("data/runs")]:
+        for f in folder.glob(f"*{clean_id}*.joblib"):
+            try:
+                f.unlink(missing_ok=True)
+                deleted_files.append(str(f))
+            except Exception:
+                pass
+
+    return {
+        "status": "success",
+        "identifier": identifier,
+        "deleted_from_registry": deleted_from_registry,
+        "deleted_files": deleted_files
+    }
+
 
