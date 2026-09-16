@@ -63,6 +63,23 @@ async def download_model_root(run_id: str):
 async def download_dataset_root(run_id: str):
     return await experiments.download_dataset(run_id=run_id)
 
+# Health & Ping endpoints for cloud keep-alive
+import time
+
+@app.get("/", tags=["health"])
+@app.get("/health", tags=["health"])
+@app.get("/ping", tags=["health"])
+@app.get("/api/health", tags=["health"])
+@app.get("/api/ping", tags=["health"])
+async def ping_backend():
+    """Keep-alive heartbeat endpoint to prevent cloud instances (e.g. Render) from spinning down."""
+    return {
+        "status": "ok",
+        "service": "AutoML Arena API",
+        "timestamp": time.time(),
+        "message": "Keep-alive ping acknowledged. Backend is active."
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -20,6 +20,9 @@ interface NavigationProps {
   isPaused?: boolean;
   onPause?: () => void;
   onAbort?: () => void;
+  isBackendAwake?: boolean;
+  isBackendPinging?: boolean;
+  latencyMs?: number | null;
 }
 
 export default function Navigation({
@@ -32,6 +35,9 @@ export default function Navigation({
   isPaused = false,
   onPause,
   onAbort,
+  isBackendAwake = true,
+  isBackendPinging = false,
+  latencyMs = null,
 }: NavigationProps) {
   const navItems: { id: NavTab; label: string; icon: string; pulse?: boolean }[] = [
     { id: 'mission-control', label: 'Arena', icon: 'radar', pulse: true },
@@ -80,6 +86,15 @@ export default function Navigation({
               <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-primary-container animate-pulse' : 'bg-error'}`}></span>
               <span className="text-on-surface-variant uppercase tracking-wider">Swarm:</span>
               <span className="text-primary font-bold">{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
+            </div>
+            <div className="w-px h-3.5 bg-outline-variant/40"></div>
+            {/* Cloud Keep-Alive Status */}
+            <div className="flex items-center gap-1.5" title="Heartbeat ping prevents cloud backend (Render) from sleeping">
+              <span className={`h-2 w-2 rounded-full ${isBackendPinging ? 'bg-amber-400 animate-ping' : isBackendAwake ? 'bg-emerald-400' : 'bg-error'}`}></span>
+              <span className="text-on-surface-variant uppercase tracking-wider">Cloud Ping:</span>
+              <span className={`font-bold ${isBackendPinging ? 'text-amber-400' : isBackendAwake ? 'text-emerald-400' : 'text-error'}`}>
+                {isBackendPinging ? 'PINGING...' : isBackendAwake ? (latencyMs ? `AWAKE (${latencyMs}ms)` : 'AWAKE') : 'SLEEPING'}
+              </span>
             </div>
             <div className="w-px h-3.5 bg-outline-variant/40"></div>
             <div className="flex items-center gap-1.5">

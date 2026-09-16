@@ -2,6 +2,8 @@
 
 > An enterprise-grade, autonomous machine learning swarm that automates ingestion, data cleaning, feature synthesis, model selection, hyperparameter optimization, and statistical certification with strict Human-in-the-Loop governance.
 
+🚀 **Live Web Application**: [https://agentic-ml-eight.vercel.app/](https://agentic-ml-eight.vercel.app/)
+
 ---
 
 ## Key Highlights & Capabilities
