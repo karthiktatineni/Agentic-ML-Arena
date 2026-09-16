@@ -20,3 +20,4 @@ portalocker
 pyyaml
 httpx
 jinja2
+psutil
