@@ -1002,9 +1002,11 @@ async def download_model(identifier: str):
             for entry in registry:
                 champ = entry.get("champion", {})
                 if entry.get("run_id") == clean_id or champ.get("experiment_hash") == clean_id:
-                    joblib_p = Path(entry.get("joblib_path", ""))
-                    if joblib_p.exists():
-                        return FileResponse(joblib_p, filename=joblib_p.name, media_type="application/octet-stream")
+                    joblib_raw = entry.get("joblib_path")
+                    if joblib_raw:
+                        joblib_p = Path(str(joblib_raw).replace("\\", "/"))
+                        if joblib_p.exists():
+                            return FileResponse(joblib_p, filename=joblib_p.name, media_type="application/octet-stream")
                     r_id = entry.get("run_id")
                     if r_id:
                         r_jobs = list((Path("data/runs") / r_id).glob("*.joblib"))

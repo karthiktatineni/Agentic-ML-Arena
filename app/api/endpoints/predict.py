@@ -47,8 +47,10 @@ def _get_latest_model_path() -> Optional[Path]:
         # Search backwards for first entry whose file actually exists
         for entry in reversed(registry):
             joblib_path = entry.get("joblib_path")
-            if joblib_path and Path(joblib_path).exists():
-                return Path(joblib_path)
+            if joblib_path:
+                normalized = Path(str(joblib_path).replace("\\", "/"))
+                if normalized.exists():
+                    return normalized
             # Check data/runs/{run_id}/
             run_id = entry.get("run_id")
             if run_id and Path(f"data/runs/{run_id}").exists():
@@ -80,8 +82,10 @@ def _get_model_path_by_id(model_id: str) -> Optional[Path]:
                     champ.get("experiment_hash") == model_id or 
                     model_id in str(entry.get("joblib_path", ""))):
                     joblib_path = entry.get("joblib_path")
-                    if joblib_path and Path(joblib_path).exists():
-                        return Path(joblib_path)
+                    if joblib_path:
+                        normalized = Path(str(joblib_path).replace("\\", "/"))
+                        if normalized.exists():
+                            return normalized
                     run_id = entry.get("run_id")
                     if run_id and Path(f"data/runs/{run_id}").exists():
                         matches = list(Path(f"data/runs/{run_id}").glob("*.joblib"))
